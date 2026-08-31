@@ -255,8 +255,6 @@ export class PostgresReceptionistRepository implements ReceptionistRepository, O
         ? null
         : `%${this.escapeLike(normalizedSearch.toLocaleLowerCase())}%`;
     const status = input.status ?? null;
-    const limitPosition = 4;
-    const offsetPosition = 5;
     const result = await this.pool.query<RoomListRow>(
       `
         SELECT r.id AS room_id,
@@ -292,7 +290,7 @@ export class PostgresReceptionistRepository implements ReceptionistRepository, O
             CASE WHEN a.id IS NULL THEN 'VACANT' ELSE 'OCCUPIED' END = $2::text
           )
         ORDER BY r.floor ASC, r.room_number::integer ASC
-        LIMIT $${limitPosition} OFFSET $${offsetPosition}
+        LIMIT $3 OFFSET $4
       `,
       [searchPattern, status, input.pageSize, (input.page - 1) * input.pageSize],
     );
