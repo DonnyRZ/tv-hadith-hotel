@@ -20,7 +20,7 @@ $signingEnvironmentNames = @(
     'TV_SIGNING_KEY_PASSWORD'
 )
 $hasSigningProperties = Test-Path -LiteralPath $signingProperties -PathType Leaf
-$hasSigningEnvironment = ($signingEnvironmentNames | Where-Object {
+$hasSigningEnvironment = @($signingEnvironmentNames | Where-Object {
         [string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$($_)" -ErrorAction SilentlyContinue).Value)
     }).Count -eq 0
 
