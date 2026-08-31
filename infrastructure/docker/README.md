@@ -13,3 +13,7 @@ directory:
 All hosted processes bind to Railway's injected `PORT`; the documented local
 ports remain available as fallbacks for development. The root `.dockerignore`
 excludes credentials, local databases, dependency folders, and build output.
+
+The two SPA images read `VITE_API_BASE_URL` during their Vite build. When that
+variable changes in a hosted environment, trigger a fresh source build so the
+new API origin is embedded in the browser bundle.
