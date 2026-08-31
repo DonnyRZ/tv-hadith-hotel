@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+autoInstallPeers: false
+engineStrict: true
+linkWorkspacePackages: false
+saveWorkspaceProtocol: rolling
+sharedWorkspaceLockfile: true
+strictPeerDependencies: true
+
+allowBuilds:
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  argon2: true
+  prisma: true

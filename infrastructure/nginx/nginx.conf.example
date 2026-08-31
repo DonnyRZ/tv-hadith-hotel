@@ -1,0 +1,58 @@
+events {}
+
+http {
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+  }
+
+  upstream api_upstream {
+    server api:3000;
+  }
+
+  upstream guest_web_upstream {
+    server guest-web:5173;
+  }
+
+  upstream staff_web_upstream {
+    server staff-web:5174;
+  }
+
+  server {
+    listen 80;
+    server_name _;
+
+    location /api/ {
+      proxy_pass http://api_upstream;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /socket.io/ {
+      proxy_http_version 1.1;
+      proxy_pass http://api_upstream;
+      proxy_read_timeout 60m;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_set_header Host $host;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /staff/ {
+      proxy_pass http://staff_web_upstream;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+      proxy_pass http://guest_web_upstream;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+  }
+}

@@ -1,0 +1,2534 @@
+openapi: 3.0.3
+info:
+  title: Room Service Hadith API
+  version: 0.1.0
+  description: |
+    OpenAPI contract for the Hotel Guest Service Platform MVP.
+
+    The API supports guest requests from a room-bound QR code or Smart TV,
+    operational department dashboards, Room Manager monitoring, and
+    Receptionist guest-room assignment. Staff authentication/RBAC, Smart TV
+    provisioning, Guest context/catalog/request APIs, and their memory and
+    PostgreSQL repository adapters are implemented in apps/api. Guest screens
+    and later operational domains remain incremental implementation work.
+servers:
+  - url: http://127.0.0.1:3000/api/v1
+    description: Local development
+tags:
+  - name: Authentication
+    description: Staff session lifecycle and current user information.
+  - name: Guest Context
+    description: Room-bound context used by QR/mobile and Smart TV clients.
+  - name: Guest Catalog
+    description: Active departments and menu items visible to a guest.
+  - name: Guest Requests
+    description: Guest request creation and status tracking.
+  - name: TV
+    description: Smart TV device context and personalized welcome state.
+  - name: Department Requests
+    description: Department-scoped operational request queue and actions.
+  - name: Room Manager
+    description: Read-only monitoring for SPA, Restaurant, Lounge, and Housekeeping.
+  - name: Receptionist
+    description: Manual guest-to-room assignment and checkout flow.
+  - name: Menu Management
+    description: |
+      Flat menu/service catalog management for the staff member's own unit,
+      subject to menu:manage permission. Restaurant, Lounge, Cafe, SPA, and
+      Beauty & Salon are CMS-enabled; categories are not part of the contract.
+  - name: Staff Management
+    description: Superadmin-only staff user and role administration.
+x-realtime:
+  transport: Socket.IO
+  namespace: /realtime
+  authentication:
+    header: X-Device-Credential
+    description: Native TV clients send the same mapped device credential used by REST.
+  companionContract: packages/contracts/realtime-events.md
+  events:
+    - guest.assignment.updated
+paths:
+  /auth/staff/login:
+    post:
+      tags: [Authentication]
+      operationId: loginStaff
+      summary: Start a staff session
+      description: Authenticates a staff user and sets a Secure, HttpOnly session cookie.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffLoginRequest'
+            examples:
+              default:
+                value:
+                  email: receptionist@hadith-hotel.com
+                  password: password
+      responses:
+        '200':
+          description: Staff session created.
+          headers:
+            Set-Cookie:
+              description: Session cookie. The concrete cookie attributes are enforced by the server.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffSessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/staff/logout:
+    post:
+      tags: [Authentication]
+      operationId: logoutStaff
+      summary: End the current staff session
+      security:
+        - StaffSession: []
+      responses:
+        '204':
+          description: Session ended and cookie invalidated.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      operationId: getCurrentStaffUser
+      summary: Get the authenticated staff user
+      security:
+        - StaffSession: []
+      responses:
+        '200':
+          description: Current staff identity, roles, and permissions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /guest/context:
+    get:
+      tags: [Guest Context]
+      operationId: getGuestContext
+      summary: Resolve the current room-bound guest context
+      description: |
+        Resolves a room from either the opaque token extracted from a QR URL
+        or the mapped Smart TV device credential. The client does not submit a
+        room number.
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      responses:
+        '200':
+          description: Room-bound guest context.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestContext'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ContextNotFound'
+
+  /guest/departments:
+    get:
+      tags: [Guest Catalog]
+      operationId: listGuestDepartments
+      summary: List guest-visible departments and units
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      responses:
+        '200':
+          description: Departments and units available to the guest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentListResponse'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ContextNotFound'
+
+  /guest/menus:
+    get:
+      tags: [Guest Catalog]
+      operationId: listGuestMenus
+      summary: List active menu items and services
+      description: Menu routing is derived from the selected item; the client does not choose a dashboard destination.
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      parameters:
+        - $ref: '#/components/parameters/GuestUnitFilter'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Active menu items for the requested unit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItemListResponse'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ContextNotFound'
+
+  /guest/menus/{menuItemId}:
+    get:
+      tags: [Guest Catalog]
+      operationId: getGuestMenuItem
+      summary: Get one active menu item or service
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Active menu item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /guest/requests:
+    get:
+      tags: [Guest Requests]
+      operationId: listGuestRequests
+      summary: List requests for the current room context
+      description: 'Returns requests belonging only to the active guest assignment in the room-bound context.'
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/RequestStatusFilter'
+      responses:
+        '200':
+          description: Requests belonging to the current room context.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestRequestListResponse'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ContextNotFound'
+    post:
+      tags: [Guest Requests]
+      operationId: createGuestRequest
+      summary: Submit a request or order
+      description: |
+        Creates a NEW request. All submitted menu items must resolve to the
+        same unit so that backend routing is unambiguous. The room is derived
+        from the QR or TV context, never from the request body.
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGuestRequest'
+            examples:
+              restaurant:
+                value:
+                  clientRequestId: 2d8f0b6e-1f7b-4c27-91c5-93d6f8b9c8c0
+                  items:
+                    - menuItemId: 2cbbf8a2-fb66-4ae4-8b95-d3b37c2a7b10
+                      quantity: 1
+                      note: No spicy sauce
+      responses:
+        '201':
+          description: Request created with status NEW.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/RequestConflict'
+
+  /guest/requests/{requestId}:
+    get:
+      tags: [Guest Requests]
+      operationId: getGuestRequest
+      summary: Get one room-bound request and its status history
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Request status and timestamps.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestRequest'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /tv/context:
+    get:
+      tags: [TV]
+      operationId: getTvContext
+      summary: Get Smart TV room and welcome state
+      description: Returns the room mapped to the TV device and the current personalized welcome state.
+      security:
+        - TvDeviceCredential: []
+      responses:
+        '200':
+          description: Smart TV context.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TvContext'
+        '401':
+          $ref: '#/components/responses/DeviceUnauthorized'
+        '404':
+          $ref: '#/components/responses/ContextNotFound'
+
+  /tv/provisioning/start:
+    post:
+      tags: [TV]
+      operationId: startTvProvisioning
+      summary: Start one-time TV pairing
+      description: Creates a short-lived pairing code for a newly installed TV. No room number or device credential is accepted from the TV.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartTvProvisioningRequest'
+      responses:
+        '200':
+          description: Pairing code created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartTvProvisioningResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /tv/provisioning/claim:
+    post:
+      tags: [TV]
+      operationId: claimTvProvisioning
+      summary: Claim a paired TV credential
+      description: Exchanges a pairing code after receptionist confirmation for the mapped TV credential.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimTvProvisioningRequest'
+      responses:
+        '200':
+          description: TV credential issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimTvProvisioningResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+        '410':
+          $ref: '#/components/responses/PairingExpired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /receptionist/tv-devices/pair:
+    post:
+      tags: [Receptionist]
+      operationId: pairTvDevice
+      summary: Map a pending TV to a room
+      description: Receptionist-only operation that binds a short-lived TV pairing code to a room.
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairTvDeviceRequest'
+      responses:
+        '200':
+          description: TV device mapped to the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairTvDeviceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+        '410':
+          $ref: '#/components/responses/PairingExpired'
+
+  /receptionist/tv-devices/{deviceId}/revoke:
+    post:
+      tags: [Receptionist]
+      operationId: revokeTvDevice
+      summary: Revoke a TV device credential
+      security:
+        - StaffSession: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: TV device revoked.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/tv-devices/{deviceId}/reset:
+    post:
+      tags: [Receptionist]
+      operationId: resetTvDevice
+      summary: Reset a TV device for re-pairing
+      description: Revokes the current credential, clears the room mapping, and starts a fresh short-lived pairing session for the same TV installation.
+      security:
+        - StaffSession: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: TV device reset and ready to pair again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetTvDeviceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /department/requests:
+    get:
+      tags: [Department Requests]
+      operationId: listDepartmentRequests
+      summary: List requests visible to the authenticated department
+      description: |
+        The server scopes results by the staff user's department role. Food &
+        Beverages may filter between Restaurant and Lounge; other departments
+        can only see their own unit.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/RequestStatusFilter'
+        - $ref: '#/components/parameters/RoomFilter'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+        - $ref: '#/components/parameters/UnitFilter'
+      responses:
+        '200':
+          description: Department-scoped operational queue or history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequestListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /department/requests/{requestId}:
+    get:
+      tags: [Department Requests]
+      operationId: getDepartmentRequest
+      summary: Get one department-scoped request
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Department request detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /department/requests/{requestId}/confirm:
+    post:
+      tags: [Department Requests]
+      operationId: confirmDepartmentRequest
+      summary: Confirm a NEW request
+      description: Only the department that owns the request may transition NEW to IN_PROCESS. Confirmed time is recorded by the server.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Request confirmed and now IN_PROCESS.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidStatusTransition'
+
+  /department/requests/{requestId}/done:
+    post:
+      tags: [Department Requests]
+      operationId: completeDepartmentRequest
+      summary: Mark an IN_PROCESS request as done
+      description: Only the department that owns the request may transition IN_PROCESS to COMPLETED. Done time is recorded by the server.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Request completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidStatusTransition'
+
+  /room-manager/requests:
+    get:
+      tags: [Room Manager]
+      operationId: listRoomManagerRequests
+      summary: List monitored request activity
+      description: |
+        Read-only monitoring limited to SPA, Restaurant, Lounge, and
+        Housekeeping. Beauty & Salon and Cafe are intentionally excluded.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/RequestStatusFilter'
+        - $ref: '#/components/parameters/RoomFilter'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+        - $ref: '#/components/parameters/MonitoredUnitFilter'
+      responses:
+        '200':
+          description: Monitored request activity and timestamps.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomManagerRequestListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /room-manager/requests/{requestId}:
+    get:
+      tags: [Room Manager]
+      operationId: getRoomManagerRequest
+      summary: Get one monitored request
+      description: Room Manager access is read-only and limited to monitored units.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Monitored request detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomManagerRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/rooms:
+    get:
+      tags: [Receptionist]
+      operationId: listReceptionistRooms
+      summary: List rooms and active guest assignments
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/RoomStatusFilter'
+        - $ref: '#/components/parameters/RoomSearch'
+      responses:
+        '200':
+          description: Room list for Receptionist dashboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceptionistRoomListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /receptionist/rooms/{roomId}:
+    get:
+      tags: [Receptionist]
+      operationId: getReceptionistRoom
+      summary: Get one room and its active guest assignment
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Room detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceptionistRoom'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/rooms/{roomId}/guest-assignment:
+    post:
+      tags: [Receptionist]
+      operationId: assignGuestToRoom
+      summary: Assign a guest to a vacant room
+      description: Creates an ACTIVE assignment and changes the application room status to OCCUPIED.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignGuestRequest'
+      responses:
+        '201':
+          description: Guest assigned to the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/RoomAssignmentConflict'
+
+  /receptionist/guest-assignments/{assignmentId}:
+    patch:
+      tags: [Receptionist]
+      operationId: updateGuestAssignment
+      summary: Edit the active guest name
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGuestAssignmentRequest'
+      responses:
+        '200':
+          description: Guest assignment updated; the TV welcome state is refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestAssignment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/AssignmentConflict'
+
+  /receptionist/guest-assignments/{assignmentId}/checkout:
+    post:
+      tags: [Receptionist]
+      operationId: checkoutGuestAssignment
+      summary: End an active guest assignment
+      description: Ends the assignment, changes the application room status to VACANT, and clears the personalized TV welcome state.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      responses:
+        '200':
+          description: Assignment checked out; room is VACANT and the personalized welcome is cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestAssignment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/AssignmentConflict'
+
+  /receptionist/rooms/{roomId}/guest-access-token:
+    post:
+      tags: [Receptionist]
+      operationId: issueGuestAccessToken
+      summary: Issue the room QR access URL
+      description: |
+        Creates or rotates the one opaque QR token for a room. The token is
+        returned only inside the QR URL; it is valid only while the room has
+        an active guest assignment.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: QR URL generated for the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestAccessTokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/rooms/{roomId}/guest-access-token/revoke:
+    post:
+      tags: [Receptionist]
+      operationId: revokeGuestAccessToken
+      summary: Revoke the room QR access token
+      description: Revokes the active QR token for the room. Revocation is recoverable by issuing a new token.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Current room QR token revocation result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeGuestAccessTokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/users:
+    get:
+      tags: [Staff Management]
+      operationId: listStaffUsers
+      summary: List all staff users
+      description: Returns active and inactive staff accounts for Superadmin administration.
+      security:
+        - StaffSession: []
+      responses:
+        '200':
+          description: Staff users without password material.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffManagementUserListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Staff Management]
+      operationId: createStaffUser
+      summary: Create a staff user
+      description: Creates a staff account and assigns one or more existing roles.
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStaffUserRequest'
+      responses:
+        '201':
+          description: Staff user created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffManagementUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/users/{userId}:
+    patch:
+      tags: [Staff Management]
+      operationId: updateStaffUser
+      summary: Update a staff user
+      description: Edits staff identity or role assignment without exposing password material.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/StaffUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStaffUserRequest'
+      responses:
+        '200':
+          description: Staff user updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffManagementUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/users/{userId}/deactivate:
+    post:
+      tags: [Staff Management]
+      operationId: deactivateStaffUser
+      summary: Deactivate a staff user
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/StaffUserId'
+      responses:
+        '200':
+          description: Staff user deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffManagementUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/users/{userId}/reactivate:
+    post:
+      tags: [Staff Management]
+      operationId: reactivateStaffUser
+      summary: Reactivate a staff user
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/StaffUserId'
+      responses:
+        '200':
+          description: Staff user reactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffManagementUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/users/{userId}/reset-password:
+    post:
+      tags: [Staff Management]
+      operationId: resetStaffPassword
+      summary: Reset a staff user password
+      description: Replaces the password hash and never returns the password.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/StaffUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetStaffPasswordRequest'
+      responses:
+        '200':
+          description: Staff user password reset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffManagementUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/roles:
+    get:
+      tags: [Staff Management]
+      operationId: listStaffRoles
+      summary: List system and custom staff roles
+      security:
+        - StaffSession: []
+      responses:
+        '200':
+          description: Role definitions and assignment counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRoleListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Staff Management]
+      operationId: createStaffRole
+      summary: Create a custom staff role
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStaffRoleRequest'
+      responses:
+        '201':
+          description: Custom role created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRole'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/roles/{roleId}:
+    patch:
+      tags: [Staff Management]
+      operationId: updateStaffRole
+      summary: Update a custom staff role
+      description: System role definitions are protected and cannot be edited.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/StaffRoleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStaffRoleRequest'
+      responses:
+        '200':
+          description: Custom role updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRole'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+    delete:
+      tags: [Staff Management]
+      operationId: deleteStaffRole
+      summary: Delete a custom staff role
+      description: A role can only be deleted when it is not assigned to a user.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/StaffRoleId'
+      responses:
+        '200':
+          description: Custom role deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRole'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/menu-items:
+    get:
+      tags: [Menu Management]
+      operationId: listManagedMenuItems
+      summary: List flat menu items or services including inactive entries
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/UnitFilter'
+        - $ref: '#/components/parameters/IncludeInactive'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Staff-scoped flat menu items or services.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItemListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Menu Management]
+      operationId: createMenuItem
+      summary: Create a menu item or service
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMenuItemRequest'
+      responses:
+        '201':
+          description: Menu item created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/menu-items/{menuItemId}:
+    get:
+      tags: [Menu Management]
+      operationId: getManagedMenuItem
+      summary: Get one managed menu item
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Managed menu item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+    patch:
+      tags: [Menu Management]
+      operationId: updateMenuItem
+      summary: Edit a menu item or service
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMenuItemRequest'
+      responses:
+        '200':
+          description: Menu item updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/menu-items/{menuItemId}/activate:
+    post:
+      tags: [Menu Management]
+      operationId: activateMenuItem
+      summary: Activate a menu item or service
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Menu item activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/menu-items/{menuItemId}/deactivate:
+    post:
+      tags: [Menu Management]
+      operationId: deactivateMenuItem
+      summary: Deactivate a menu item or service
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Menu item deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+components:
+  securitySchemes:
+    StaffSession:
+      type: apiKey
+      in: cookie
+      name: room_service_session
+      description: Secure HttpOnly staff session cookie. Staff users do not use a bearer token in this MVP.
+    GuestAccessToken:
+      type: apiKey
+      in: header
+      name: X-Guest-Access-Token
+      description: Opaque token extracted from the room QR URL. It is not a room number and is scoped to a room context.
+    TvDeviceCredential:
+      type: apiKey
+      in: header
+      name: X-Device-Credential
+      description: Credential for the Smart TV device mapped to a room.
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: One-based page number.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      description: Number of records per page.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    RequestStatusFilter:
+      name: status
+      in: query
+      description: Filter by operational request status.
+      required: false
+      schema:
+        $ref: '#/components/schemas/RequestStatus'
+    RoomFilter:
+      name: room
+      in: query
+      description: Filter by room number.
+      required: false
+      schema:
+        type: string
+        maxLength: 20
+    DateFrom:
+      name: dateFrom
+      in: query
+      description: Inclusive request date in ISO 8601 date format.
+      required: false
+      schema:
+        type: string
+        format: date
+    DateTo:
+      name: dateTo
+      in: query
+      description: Inclusive request date in ISO 8601 date format.
+      required: false
+      schema:
+        type: string
+        format: date
+    UnitFilter:
+      name: unit
+      in: query
+      description: Filter by department unit. Server-side RBAC still limits the result.
+      required: false
+      schema:
+        $ref: '#/components/schemas/UnitCode'
+    GuestUnitFilter:
+      name: unit
+      in: query
+      description: Guest menu unit to load. Lounge is returned by departments but is disabled until configured.
+      required: true
+      schema:
+        $ref: '#/components/schemas/UnitCode'
+    MonitoredUnitFilter:
+      name: unit
+      in: query
+      description: Room Manager filter limited to monitored units.
+      required: false
+      schema:
+        $ref: '#/components/schemas/MonitoredUnitCode'
+    IncludeInactive:
+      name: includeInactive
+      in: query
+      description: Include deactivated menu items.
+      required: false
+      schema:
+        type: boolean
+        default: false
+    RoomStatusFilter:
+      name: status
+      in: query
+      description: Filter by application room status.
+      required: false
+      schema:
+        $ref: '#/components/schemas/RoomStatus'
+    RoomSearch:
+      name: search
+      in: query
+      description: Search by room number or active guest name.
+      required: false
+      schema:
+        type: string
+        maxLength: 100
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RoomId:
+      name: roomId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MenuItemId:
+      name: menuItemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    StaffUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    StaffRoleId:
+      name: roleId
+      in: path
+      required: true
+      schema:
+        type: string
+        description: System role code or custom role identifier.
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Staff session is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    GuestContextUnauthorized:
+      description: Guest access token or TV device credential is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    DeviceUnauthorized:
+      description: Smart TV device credential is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InvalidCredentials:
+      description: Staff credentials are invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: The authenticated role or permission cannot access this resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ResourceNotFound:
+      description: The requested resource does not exist or is outside the caller's scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ContextNotFound:
+      description: The QR token or device is not mapped to a valid room context.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    RequestConflict:
+      description: Duplicate client request ID, unavailable menu item, or cross-unit request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InvalidStatusTransition:
+      description: The requested status transition is not valid for the current state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    RoomAssignmentConflict:
+      description: The room is already occupied or cannot accept a new assignment.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    AssignmentConflict:
+      description: The guest assignment is not active or cannot be changed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ResourceConflict:
+      description: The requested resource change conflicts with existing data.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: Too many authentication attempts.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    PairingExpired:
+      description: The one-time TV pairing code has expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    ApiError:
+      type: object
+      required: [statusCode, code, message, timestamp]
+      properties:
+        statusCode:
+          type: integer
+          example: 409
+        code:
+          description: Stable machine-readable error code.
+          example: INVALID_STATUS_TRANSITION
+        message:
+          type: string
+          example: Request cannot be completed from its current status.
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationErrorDetail'
+        requestId:
+          type: string
+          description: Correlation ID for support and audit logs.
+          example: 0d4f2e0b-2f37-4f90-9cf7-96b13e4e4ca7
+        timestamp:
+          type: string
+          format: date-time
+          example: 2026-08-29T14:08:00Z
+    ValidationErrorDetail:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          example: items[0].quantity
+        message:
+          type: string
+          example: Quantity must be at least 1.
+    RoleCode:
+      type: string
+      enum:
+        - SUPERADMIN
+        - ROOM_MANAGER
+        - RECEPTIONIST
+        - SPA
+        - RESTAURANT
+        - LOUNGE
+        - HOUSEKEEPING
+        - BEAUTY_AND_SALON
+        - CAFE
+    DepartmentCode:
+      type: string
+      enum:
+        - SPA
+        - FOOD_AND_BEVERAGES
+        - HOUSEKEEPING
+        - BEAUTY_AND_SALON
+        - CAFE
+    UnitCode:
+      type: string
+      enum:
+        - SPA
+        - RESTAURANT
+        - LOUNGE
+        - HOUSEKEEPING
+        - BEAUTY_AND_SALON
+        - CAFE
+    MonitoredUnitCode:
+      type: string
+      enum: [SPA, RESTAURANT, LOUNGE, HOUSEKEEPING]
+    RequestStatus:
+      type: string
+      enum: [NEW, IN_PROCESS, COMPLETED]
+    RoomStatus:
+      type: string
+      enum: [VACANT, OCCUPIED]
+    AssignmentStatus:
+      type: string
+      enum: [ACTIVE, CHECKED_OUT]
+    MenuItemKind:
+      type: string
+      enum: [PRODUCT, SERVICE]
+    LocalizedText:
+      type: object
+      required: [uz, ru, en]
+      properties:
+        uz:
+          type: string
+          minLength: 1
+          maxLength: 200
+        ru:
+          type: string
+          minLength: 1
+          maxLength: 200
+        en:
+          type: string
+          minLength: 1
+          maxLength: 200
+    LocalizedDescription:
+      type: object
+      required: [uz, ru, en]
+      properties:
+        uz:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        ru:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        en:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    StaffLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 320
+          description: Staff email address used for authentication.
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 200
+    StaffSessionResponse:
+      type: object
+      required: [user, expiresAt]
+      properties:
+        user:
+          $ref: '#/components/schemas/StaffUser'
+        expiresAt:
+          type: string
+          format: date-time
+    StaffUser:
+      type: object
+      required: [id, displayName, roles, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          example: Siti Receptionist
+        roles:
+          type: array
+          items:
+            type: string
+          description: System role codes or custom role codes assigned to the user.
+        permissions:
+          type: array
+          items:
+            type: string
+          example: [request:view, request:confirm, request:complete]
+    StaffManagementUser:
+      type: object
+      required: [id, email, displayName, roles, active, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        roles:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StaffManagementUserListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffManagementUser'
+    CreateStaffUserRequest:
+      type: object
+      required: [email, displayName, roles, password]
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 320
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 200
+        active:
+          type: boolean
+          default: true
+    UpdateStaffUserRequest:
+      type: object
+      minProperties: 1
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+        active:
+          type: boolean
+    ResetStaffPasswordRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 200
+    StaffRole:
+      type: object
+      required: [id, code, name, description, system, permissions, userCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          description: System role code or custom role identifier.
+        code:
+          anyOf:
+            - $ref: '#/components/schemas/RoleCode'
+            - type: string
+          description: System role code or custom role code.
+        name:
+          type: string
+        description:
+          type: string
+        system:
+          type: boolean
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        userCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StaffRoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffRole'
+    CreateStaffRoleRequest:
+      type: object
+      required: [code, name, description, permissions]
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 60
+          pattern: '^[A-Za-z][A-Za-z0-9_-]*$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+    UpdateStaffRoleRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+    RoomReference:
+      type: object
+      required: [id, number]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          example: '302'
+    DepartmentUnit:
+      type: object
+      required: [code, department, name, roomManagerMonitoring, enabled, disabledReason]
+      properties:
+        code:
+          $ref: '#/components/schemas/UnitCode'
+        department:
+          $ref: '#/components/schemas/DepartmentCode'
+        name:
+          type: string
+          example: Restaurant
+        roomManagerMonitoring:
+          type: boolean
+          example: true
+        enabled:
+          type: boolean
+          description: Whether the guest can open and request from this unit.
+          example: true
+        disabledReason:
+          type: string
+          enum: [MENU_NOT_CONFIGURED]
+          nullable: true
+          example: null
+    DepartmentSummary:
+      type: object
+      required: [code, name, units]
+      properties:
+        code:
+          $ref: '#/components/schemas/DepartmentCode'
+        name:
+          type: string
+          example: Food & Beverages
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentUnit'
+    DepartmentListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentSummary'
+    WelcomeState:
+      type: object
+      required: [message, personalized]
+      properties:
+        message:
+          type: string
+          example: Welcome, Ahmad Fauzan
+        guestName:
+          type: string
+          nullable: true
+          example: Ahmad Fauzan
+        personalized:
+          type: boolean
+          example: true
+    GuestContext:
+      type: object
+      required: [room, roomStatus, welcome, availableUnits]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        roomStatus:
+          $ref: '#/components/schemas/RoomStatus'
+        welcome:
+          $ref: '#/components/schemas/WelcomeState'
+        availableUnits:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/UnitCode'
+    GuestAccessTokenResponse:
+      type: object
+      required: [room, qrUrl, issuedAt]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        qrUrl:
+          type: string
+          format: uri
+          description: Opaque URL to encode into the room QR code.
+        issuedAt:
+          type: string
+          format: date-time
+    RevokeGuestAccessTokenResponse:
+      type: object
+      required: [room, revoked, revokedAt]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        revoked:
+          type: boolean
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+    TvDevice:
+      type: object
+      required: [id, deviceCode, room]
+      properties:
+        id:
+          type: string
+          format: uuid
+        deviceCode:
+          type: string
+          example: device_a83ks9
+        room:
+          $ref: '#/components/schemas/RoomReference'
+    TvContext:
+      type: object
+      required: [device, roomStatus, welcome]
+      properties:
+        device:
+          $ref: '#/components/schemas/TvDevice'
+        roomStatus:
+          $ref: '#/components/schemas/RoomStatus'
+        welcome:
+          $ref: '#/components/schemas/WelcomeState'
+    StartTvProvisioningRequest:
+      type: object
+      required: [installationId, appVersion, deviceModel, androidApiLevel]
+      properties:
+        installationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        appVersion:
+          type: string
+          minLength: 1
+          maxLength: 50
+        deviceModel:
+          type: string
+          minLength: 1
+          maxLength: 120
+        androidApiLevel:
+          type: integer
+          minimum: 21
+          maximum: 100
+    StartTvProvisioningResponse:
+      type: object
+      required: [deviceId, deviceCode, pairingCode, expiresAt]
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+        deviceCode:
+          type: string
+          example: device_a83ks9
+        pairingCode:
+          type: string
+          pattern: '^[0-9]{6}$'
+        expiresAt:
+          type: string
+          format: date-time
+    ClaimTvProvisioningRequest:
+      type: object
+      required: [pairingCode, installationId]
+      properties:
+        pairingCode:
+          type: string
+          pattern: '^[0-9]{6}$'
+        installationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+    ClaimTvProvisioningResponse:
+      type: object
+      required: [credential, device]
+      properties:
+        credential:
+          type: string
+          minLength: 16
+        device:
+          $ref: '#/components/schemas/TvDevice'
+    PairTvDeviceRequest:
+      type: object
+      required: [pairingCode, roomId, roomNumber]
+      properties:
+        pairingCode:
+          type: string
+          pattern: '^[0-9]{6}$'
+        roomId:
+          type: string
+          format: uuid
+        roomNumber:
+          type: string
+          minLength: 1
+          maxLength: 20
+    PairTvDeviceResponse:
+      type: object
+      required: [device, pairedAt]
+      properties:
+        device:
+          $ref: '#/components/schemas/TvDevice'
+        pairedAt:
+          type: string
+          format: date-time
+    ResetTvDeviceResponse:
+      type: object
+      required: [deviceId, status, pairingExpiresAt]
+      properties:
+        deviceId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING]
+        pairingExpiresAt:
+          type: string
+          format: date-time
+    MenuItem:
+      type: object
+      required:
+        - id
+        - unit
+        - kind
+        - name
+        - localizedName
+        - sortOrder
+        - active
+        - available
+        - quantityAllowed
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        unit:
+          $ref: '#/components/schemas/UnitCode'
+        kind:
+          $ref: '#/components/schemas/MenuItemKind'
+        name:
+          type: string
+          example: Nasi Goreng
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        sortOrder:
+          type: integer
+          minimum: 0
+          example: 1
+        description:
+          type: string
+          nullable: true
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        price:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          example: 85000
+        currency:
+          type: string
+          nullable: true
+          minLength: 3
+          maxLength: 3
+          example: IDR
+        durationMinutes:
+          type: integer
+          minimum: 1
+          nullable: true
+          example: 60
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        active:
+          type: boolean
+          example: true
+        available:
+          type: boolean
+          example: true
+        quantityAllowed:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateGuestRequest:
+      type: object
+      required: [clientRequestId, items]
+      properties:
+        clientRequestId:
+          type: string
+          format: uuid
+          description: Client-generated idempotency key. Must be unique for the room context.
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreateGuestRequestItem'
+        guestNote:
+          type: string
+          maxLength: 1000
+          nullable: true
+          description: Optional guest note retained with the request; it is not a payment note.
+    CreateGuestRequestItem:
+      type: object
+      required: [menuItemId, quantity]
+      properties:
+        menuItemId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100
+        note:
+          type: string
+          maxLength: 500
+          nullable: true
+    RequestItem:
+      type: object
+      required: [menuItemId, unit, kind, name, localizedName, quantity, unitPrice, currency]
+      properties:
+        menuItemId:
+          type: string
+          format: uuid
+        unit:
+          $ref: '#/components/schemas/UnitCode'
+        kind:
+          $ref: '#/components/schemas/MenuItemKind'
+        name:
+          type: string
+          example: Nasi Goreng
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        quantity:
+          type: integer
+          minimum: 1
+        note:
+          type: string
+          maxLength: 500
+          nullable: true
+        unitPrice:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          nullable: true
+    StatusHistoryEntry:
+      type: object
+      required: [id, toStatus, changedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        fromStatus:
+          type: string
+          enum: [NEW, IN_PROCESS, COMPLETED]
+          nullable: true
+        toStatus:
+          $ref: '#/components/schemas/RequestStatus'
+        changedAt:
+          type: string
+          format: date-time
+        changedBy:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StaffActor'
+    StaffActor:
+      type: object
+      required: [id, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        role:
+          type: string
+          enum:
+            - ROOM_MANAGER
+            - RECEPTIONIST
+            - SPA
+            - RESTAURANT
+            - LOUNGE
+            - HOUSEKEEPING
+            - BEAUTY_AND_SALON
+            - CAFE
+          nullable: true
+    GuestRequest:
+      type: object
+      required:
+        [
+          id,
+          clientRequestId,
+          department,
+          unit,
+          items,
+          status,
+          requestedAt,
+          statusHistory,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientRequestId:
+          type: string
+          format: uuid
+        department:
+          $ref: '#/components/schemas/DepartmentCode'
+        unit:
+          $ref: '#/components/schemas/UnitCode'
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RequestItem'
+        guestNote:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        requestedAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        statusHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusHistoryEntry'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StaffRequest:
+      allOf:
+        - $ref: '#/components/schemas/GuestRequest'
+        - type: object
+          required: [room, guestAssignmentId]
+          properties:
+            room:
+              $ref: '#/components/schemas/RoomReference'
+            guestAssignmentId:
+              type: string
+              format: uuid
+              nullable: true
+    RoomManagerRequest:
+      allOf:
+        - $ref: '#/components/schemas/GuestRequest'
+        - type: object
+          required: [room, guestAssignmentId]
+          description: Read-only view restricted to monitored units.
+          properties:
+            room:
+              $ref: '#/components/schemas/RoomReference'
+            guestAssignmentId:
+              type: string
+              format: uuid
+              nullable: true
+            unit:
+              $ref: '#/components/schemas/MonitoredUnitCode'
+    GuestRequestListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GuestRequest'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+    StaffRequestListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffRequest'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+    RoomManagerRequestListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomManagerRequest'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+    MenuItemListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MenuItem'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+    CreateMenuItemRequest:
+      type: object
+      description: |
+        Use PRODUCT for Restaurant, Lounge, and Cafe catalogs. Use SERVICE
+        for SPA and Beauty & Salon catalogs.
+      required: [unit, kind, localizedName]
+      properties:
+        unit:
+          $ref: '#/components/schemas/UnitCode'
+        kind:
+          $ref: '#/components/schemas/MenuItemKind'
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        price:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          nullable: true
+          example: IDR
+        durationMinutes:
+          type: integer
+          minimum: 1
+          nullable: true
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        available:
+          type: boolean
+          default: true
+        quantityAllowed:
+          type: boolean
+          default: false
+        sortOrder:
+          type: integer
+          minimum: 0
+          default: 0
+    UpdateMenuItemRequest:
+      type: object
+      minProperties: 1
+      properties:
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        price:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          nullable: true
+        durationMinutes:
+          type: integer
+          minimum: 1
+          nullable: true
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        available:
+          type: boolean
+        quantityAllowed:
+          type: boolean
+        sortOrder:
+          type: integer
+          minimum: 0
+    AssignGuestRequest:
+      type: object
+      required: [guestName, stayDays]
+      properties:
+        guestName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Ahmad Fauzan
+        stayDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          example: 3
+    UpdateGuestAssignmentRequest:
+      type: object
+      required: [guestName]
+      properties:
+        guestName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Ahmad F. Fauzan
+        stayDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          example: 4
+    GuestAssignment:
+      type: object
+      required: [id, room, guestName, stayDays, status, assignedAt, updatedAt, assignedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        guestName:
+          type: string
+          example: Ahmad Fauzan
+        stayDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          example: 3
+        status:
+          $ref: '#/components/schemas/AssignmentStatus'
+        assignedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        checkedOutAt:
+          type: string
+          format: date-time
+          nullable: true
+        assignedBy:
+          $ref: '#/components/schemas/StaffActor'
+    ReceptionistRoom:
+      type: object
+      required: [room, roomStatus, activeAssignment]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        roomStatus:
+          $ref: '#/components/schemas/RoomStatus'
+        activeAssignment:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/GuestAssignment'
+          nullable: true
+    ReceptionistRoomListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceptionistRoom'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0

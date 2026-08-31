@@ -1,0 +1,14 @@
+{
+  "name": "@room-service/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "openapi.yaml",
+    "README.md",
+    "realtime-events.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

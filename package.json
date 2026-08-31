@@ -1,0 +1,42 @@
+{
+  "name": "room-service-hadith",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "pnpm": ">=11.19.0 <12"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "contract:lint": "redocly lint packages/contracts/openapi.yaml",
+    "dev": "pnpm -r --parallel --if-present run dev",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
+    "test:contract": "vitest run tests/contract",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:list": "playwright test --list",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "typecheck:config": "tsc --noEmit -p tsconfig.tools.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
+    "validate": "pnpm format && pnpm lint && pnpm contract:lint && pnpm typecheck:config && pnpm typecheck:tests && pnpm typecheck && pnpm test",
+    "infra:config": "docker compose config --quiet"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.49.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.4.0",
+    "eslint": "^10.9.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.68.0",
+    "yaml": "^2.9.0",
+    "vitest": "^4.1.11"
+  }
+}

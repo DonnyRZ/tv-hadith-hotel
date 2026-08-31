@@ -1,0 +1,16 @@
+.git
+.pnpm
+Docs/**
+build
+coverage
+dist
+node_modules
+pnpm-lock.yaml
+playwright-report
+test-results
+apps/tv-shell/gradle
+apps/tv-shell/gradlew
+apps/tv-shell/gradlew.bat
+.android-avd/**
+.android-cmdline-tools/**
+.android-tools-download/**

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "files": ["../../types/workspace-placeholder.d.ts"],
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

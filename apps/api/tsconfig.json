@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "declaration": true,
+    "esModuleInterop": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "lib": ["ES2023"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./dist",
+    "sourceMap": true,
+    "types": ["node"],
+    "verbatimModuleSyntax": false
+  },
+  "files": ["../../types/workspace-placeholder.d.ts"],
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "coverage"]
+}

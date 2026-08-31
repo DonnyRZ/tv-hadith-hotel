@@ -1,0 +1,18 @@
+{
+  "background_color": "#07152a",
+  "description": "A calm, multilingual guest service for Hadith Hotel.",
+  "display": "standalone",
+  "icons": [
+    {
+      "sizes": "512x512",
+      "src": "/assets/hadith-hotel/brand/logo-hadith-2.png",
+      "type": "image/png"
+    }
+  ],
+  "name": "Hadith Hotel Guest Services",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "Hadith Guest",
+  "start_url": "/",
+  "theme_color": "#07152a"
+}

@@ -1,0 +1,11 @@
+# Copy this file to signing.properties for a release build.
+# Keep signing.properties and the keystore outside source control.
+# Use an absolute path to a protected key-custody location.
+# Windows example (Java properties escaping):
+storeFile=C:\\secure\\room-service-tv-release.jks
+# Linux/macOS example:
+# storeFile=/secure/room-service-tv-release.jks
+# The same signing key must be retained for every update of this package.
+storePassword=replace-me
+keyAlias=room-service-tv
+keyPassword=replace-me
