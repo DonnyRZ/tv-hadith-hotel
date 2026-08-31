@@ -9,12 +9,14 @@ import {
   Param,
   ParseUUIDPipe,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { StaffSessionGuard } from '../auth/guards/staff-session.guard';
 import { ClaimTvProvisioningDto } from './dto/claim-tv-provisioning.dto';
+import { ListTvDevicesDto } from './dto/list-tv-devices.dto';
 import { PairTvDeviceDto } from './dto/pair-tv-device.dto';
 import { StartTvProvisioningDto } from './dto/start-tv-provisioning.dto';
 import { TvService } from './tv.service';
@@ -46,6 +48,16 @@ export class TvController {
 @RequirePermissions('receptionist:tv:pair')
 export class ReceptionistTvDevicesController {
   public constructor(private readonly tvService: TvService) {}
+
+  @Get()
+  public list(@Query() query: ListTvDevicesDto) {
+    return this.tvService.listDevices({
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 25,
+      ...(query.roomId === undefined ? {} : { roomId: query.roomId }),
+      ...(query.status === undefined ? {} : { status: query.status }),
+    });
+  }
 
   @Post('pair')
   @HttpCode(HttpStatus.OK)

@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
 import { ReceptionistModule } from '../receptionist/receptionist.module';
 import { InMemoryTvDeviceRepository } from './in-memory-tv-device.repository';
+import { PostgresTvDeviceRepository } from './postgres-tv-device.repository';
 import { TV_DEVICE_REPOSITORY } from './tv-device.repository';
 import { ReceptionistTvDevicesController, TvController } from './tv.controller';
 import { TvRealtimeGateway } from './tv.realtime.gateway';
@@ -16,7 +17,15 @@ import { TvAssignmentEventBridge } from './tv.assignment-event-bridge';
   providers: [
     {
       provide: TV_DEVICE_REPOSITORY,
-      useClass: InMemoryTvDeviceRepository,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const store =
+          config.get<string>('AUTH_STORE') ??
+          (config.get<string>('NODE_ENV') === 'production' ? 'postgres' : 'memory');
+        return store === 'postgres'
+          ? new PostgresTvDeviceRepository(config)
+          : new InMemoryTvDeviceRepository();
+      },
     },
     TvService,
     TvRealtimeGateway,

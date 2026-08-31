@@ -85,3 +85,25 @@ export interface ResetTvDeviceResult {
   status: 'PENDING';
   pairingExpiresAt: string;
 }
+
+export interface ListTvDevicesInput {
+  page: number;
+  pageSize: number;
+  roomId?: string;
+  status?: TvProvisioningStatus;
+}
+
+export interface TvDeviceAdminView {
+  id: string;
+  deviceCode: string;
+  status: TvProvisioningStatus;
+  room: TvRoomReference | null;
+  pairingExpiresAt: string;
+  deviceModel: string;
+  appVersion: string;
+  androidApiLevel: number;
+  createdAt: string;
+  pairedAt: string | null;
+  claimedAt: string | null;
+  revokedAt: string | null;
+}

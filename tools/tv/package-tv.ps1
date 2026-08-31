@@ -13,9 +13,19 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $tvProjectRoot = Join-Path $repositoryRoot 'apps\tv-shell'
 $gradleWrapper = Join-Path $tvProjectRoot 'gradlew.bat'
 $signingProperties = Join-Path $tvProjectRoot 'signing.properties'
+$signingEnvironmentNames = @(
+    'TV_SIGNING_STORE_FILE',
+    'TV_SIGNING_STORE_PASSWORD',
+    'TV_SIGNING_KEY_ALIAS',
+    'TV_SIGNING_KEY_PASSWORD'
+)
+$hasSigningProperties = Test-Path -LiteralPath $signingProperties -PathType Leaf
+$hasSigningEnvironment = ($signingEnvironmentNames | Where-Object {
+        [string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$($_)" -ErrorAction SilentlyContinue).Value)
+    }).Count -eq 0
 
-if (-not (Test-Path -LiteralPath $signingProperties -PathType Leaf)) {
-    throw 'Release packaging requires apps/tv-shell/signing.properties. Copy signing.properties.example and use a real keystore outside source control.'
+if (-not $hasSigningProperties -and -not $hasSigningEnvironment) {
+    throw 'Release packaging requires apps/tv-shell/signing.properties or all TV_SIGNING_* environment variables. Use a real keystore outside source control.'
 }
 
 try {

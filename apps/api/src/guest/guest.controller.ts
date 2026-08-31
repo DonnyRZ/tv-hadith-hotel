@@ -16,6 +16,7 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { StaffSessionGuard } from '../auth/guards/staff-session.guard';
 import { CurrentGuestContext } from './current-guest-context.decorator';
+import { BatchGuestAccessTokenDto } from './dto/batch-guest-access-token.dto';
 import { CreateGuestRequestDto } from './dto/create-guest-request.dto';
 import { ListGuestMenusDto } from './dto/list-guest-menus.dto';
 import { ListGuestRequestsDto } from './dto/list-guest-requests.dto';
@@ -99,9 +100,27 @@ export class GuestQrController {
     return this.guestQrService.issueForRoom(roomId);
   }
 
+  @Get(':roomId/guest-access-token')
+  public getTokenStatus(@Param('roomId', new ParseUUIDPipe()) roomId: string) {
+    return this.guestQrService.getForRoom(roomId);
+  }
+
   @Post(':roomId/guest-access-token/revoke')
   @HttpCode(HttpStatus.OK)
   public revokeToken(@Param('roomId', new ParseUUIDPipe()) roomId: string) {
     return this.guestQrService.revokeForRoom(roomId);
+  }
+}
+
+@Controller('receptionist/guest-access-tokens')
+@UseGuards(StaffSessionGuard, PermissionsGuard)
+@RequirePermissions('receptionist:guest:assign')
+export class GuestQrBatchController {
+  public constructor(private readonly guestQrService: GuestQrService) {}
+
+  @Post('batch')
+  @HttpCode(HttpStatus.OK)
+  public issueBatch(@Body() input: BatchGuestAccessTokenDto) {
+    return this.guestQrService.issueForRooms(input.roomIds);
   }
 }

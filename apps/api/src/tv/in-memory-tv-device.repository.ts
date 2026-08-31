@@ -3,8 +3,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
 import type { TvDeviceRepository } from './tv-device.repository';
+import { TvDeviceRoomConflictError } from './tv-device.repository';
 import type {
   CreatedTvDevice,
+  ListTvDevicesInput,
   PairTvDeviceInput,
   StartTvProvisioningInput,
   TvDeviceRecord,
@@ -44,20 +46,30 @@ export class InMemoryTvDeviceRepository implements TvDeviceRepository {
     );
 
     if (existing !== undefined) {
+      const pairingCode = this.createUniquePairingCode(existing.id);
+      const credential = createDeviceCredential();
+      const createdAt = new Date();
+      existing.pairingCodeHash = hashTvSecret(pairingCode);
+      existing.pairingExpiresAt = new Date(createdAt.getTime() + ttlSeconds * 1000).toISOString();
+      existing.credentialHash = hashTvSecret(credential);
+      existing.credential = credential;
+      existing.status = 'PENDING';
+      existing.room = null;
+      existing.deviceModel = input.deviceModel;
+      existing.appVersion = input.appVersion;
+      existing.androidApiLevel = input.androidApiLevel;
+      existing.pairedAt = null;
+      existing.claimedAt = null;
+      existing.revokedAt = null;
+      this.records.set(existing.id, existing);
+      this.pairingCodes.set(existing.id, pairingCode);
       return {
         record: cloneRecord(existing),
-        pairingCode: this.pairingCodes.get(existing.id) ?? '',
+        pairingCode,
       };
     }
 
-    let pairingCode = createPairingCode();
-    while (
-      [...this.records.values()].some(
-        (record) => record.pairingCodeHash === hashTvSecret(pairingCode),
-      )
-    ) {
-      pairingCode = createPairingCode();
-    }
+    const pairingCode = this.createUniquePairingCode();
 
     const createdAt = new Date();
     const record: TvDeviceRecord = {
@@ -91,6 +103,18 @@ export class InMemoryTvDeviceRepository implements TvDeviceRepository {
     };
   }
 
+  public async list(input: ListTvDevicesInput) {
+    const filtered = [...this.records.values()]
+      .filter((record) => input.roomId === undefined || record.room?.id === input.roomId)
+      .filter((record) => input.status === undefined || record.status === input.status)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const offset = (input.page - 1) * input.pageSize;
+    return {
+      items: filtered.slice(offset, offset + input.pageSize).map(cloneRecord),
+      total: filtered.length,
+    };
+  }
+
   public async findByPairingCode(pairingCode: string): Promise<TvDeviceRecord | null> {
     const hash = hashTvSecret(pairingCode);
     const record = [...this.records.values()].find(
@@ -117,6 +141,17 @@ export class InMemoryTvDeviceRepository implements TvDeviceRepository {
     }
     if (record.status !== 'PENDING') {
       throw new ConflictException('TV pairing code has already been used.');
+    }
+
+    if (
+      [...this.records.values()].some(
+        (candidate) =>
+          candidate.id !== recordId &&
+          candidate.room?.id === input.roomId &&
+          (candidate.status === 'PAIRED' || candidate.status === 'CLAIMED'),
+      )
+    ) {
+      throw new TvDeviceRoomConflictError();
     }
 
     record.room = { id: input.roomId, number: input.roomNumber };
@@ -176,15 +211,7 @@ export class InMemoryTvDeviceRepository implements TvDeviceRepository {
       throw new NotFoundException('TV device does not exist.');
     }
 
-    let pairingCode = createPairingCode();
-    while (
-      [...this.records.values()].some(
-        (candidate) =>
-          candidate.id !== recordId && candidate.pairingCodeHash === hashTvSecret(pairingCode),
-      )
-    ) {
-      pairingCode = createPairingCode();
-    }
+    const pairingCode = this.createUniquePairingCode(recordId);
 
     const credential = createDeviceCredential();
     record.pairingCodeHash = hashTvSecret(pairingCode);
@@ -203,5 +230,18 @@ export class InMemoryTvDeviceRepository implements TvDeviceRepository {
       record: cloneRecord(record),
       pairingCode,
     };
+  }
+
+  private createUniquePairingCode(excludeRecordId?: string): string {
+    let pairingCode = createPairingCode();
+    while (
+      [...this.records.values()].some(
+        (record) =>
+          record.id !== excludeRecordId && record.pairingCodeHash === hashTvSecret(pairingCode),
+      )
+    ) {
+      pairingCode = createPairingCode();
+    }
+    return pairingCode;
   }
 }

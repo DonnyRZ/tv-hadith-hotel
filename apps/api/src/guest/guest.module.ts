@@ -13,14 +13,14 @@ import {
 } from './guest-qr.repository';
 import { GuestContextGuard } from './guest-context.guard';
 import { GuestContextResolver } from './guest-context.resolver';
-import { GuestController, GuestQrController } from './guest.controller';
+import { GuestController, GuestQrBatchController, GuestQrController } from './guest.controller';
 import { readGuestDevelopmentFixture } from './guest-dev-fixtures';
 import { GuestQrService } from './guest-qr.service';
 import { GuestService } from './guest.service';
 
 @Module({
   imports: [ConfigModule, AuthModule, MenuModule, ReceptionistModule, RequestModule, TvModule],
-  controllers: [GuestController, GuestQrController],
+  controllers: [GuestController, GuestQrController, GuestQrBatchController],
   providers: [
     {
       provide: GUEST_QR_TOKEN_REPOSITORY,

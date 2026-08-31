@@ -19,7 +19,9 @@ export class GuestQrRoomNotFoundError extends Error {
 
 export interface GuestQrTokenRepository {
   issueForRoom(roomId: string): Promise<IssuedGuestQrToken>;
+  issueForRooms(roomIds: string[]): Promise<IssuedGuestQrToken[]>;
   findActiveByToken(token: string): Promise<GuestQrTokenRecord | null>;
+  findActiveForRoom(roomId: string): Promise<GuestQrTokenRecord | null>;
   revokeForRoom(roomId: string): Promise<GuestQrTokenRecord | null>;
 }
 
@@ -66,34 +68,50 @@ export class InMemoryGuestQrTokenRepository implements GuestQrTokenRepository {
   }
 
   public async issueForRoom(roomId: string): Promise<IssuedGuestQrToken> {
-    const room = roomForId(roomId);
-    if (room === undefined) throw new GuestQrRoomNotFoundError();
+    const issued = await this.issueForRooms([roomId]);
+    return issued[0] as IssuedGuestQrToken;
+  }
 
+  public async issueForRooms(roomIds: string[]): Promise<IssuedGuestQrToken[]> {
+    const rooms = roomIds.map((roomId) => {
+      const room = roomForId(roomId);
+      if (room === undefined) throw new GuestQrRoomNotFoundError();
+      return room;
+    });
     const issuedAt = now();
-    for (const record of this.records.values()) {
-      if (record.roomId === room.id && record.active) {
-        record.active = false;
-        record.revokedAt = issuedAt;
+    return rooms.map((room) => {
+      for (const record of this.records.values()) {
+        if (record.roomId === room.id && record.active) {
+          record.active = false;
+          record.revokedAt = issuedAt;
+        }
       }
-    }
 
-    const token = randomBytes(32).toString('base64url');
-    const record: GuestQrTokenRecord = {
-      id: randomUUID(),
-      roomId: room.id,
-      tokenHash: hashGuestAccessToken(token),
-      active: true,
-      createdAt: issuedAt,
-      revokedAt: null,
-    };
-    this.records.set(record.id, record);
-    return { record: cloneRecord(record), token };
+      const token = randomBytes(32).toString('base64url');
+      const record: GuestQrTokenRecord = {
+        id: randomUUID(),
+        roomId: room.id,
+        tokenHash: hashGuestAccessToken(token),
+        active: true,
+        createdAt: issuedAt,
+        revokedAt: null,
+      };
+      this.records.set(record.id, record);
+      return { record: cloneRecord(record), token };
+    });
   }
 
   public async findActiveByToken(token: string): Promise<GuestQrTokenRecord | null> {
     const tokenHash = hashGuestAccessToken(token);
     const record = [...this.records.values()].find(
       (candidate) => candidate.active && candidate.tokenHash === tokenHash,
+    );
+    return record === undefined ? null : cloneRecord(record);
+  }
+
+  public async findActiveForRoom(roomId: string): Promise<GuestQrTokenRecord | null> {
+    const record = [...this.records.values()].find(
+      (candidate) => candidate.roomId === roomId && candidate.active,
     );
     return record === undefined ? null : cloneRecord(record);
   }
@@ -135,35 +153,45 @@ export class PostgresGuestQrTokenRepository implements GuestQrTokenRepository, O
   }
 
   public async issueForRoom(roomId: string): Promise<IssuedGuestQrToken> {
-    await this.ensureInitialized();
-    const room = roomForId(roomId);
-    if (room === undefined) throw new GuestQrRoomNotFoundError();
+    const issued = await this.issueForRooms([roomId]);
+    return issued[0] as IssuedGuestQrToken;
+  }
 
-    const token = randomBytes(32).toString('base64url');
-    const tokenHash = hashGuestAccessToken(token);
+  public async issueForRooms(roomIds: string[]): Promise<IssuedGuestQrToken[]> {
+    await this.ensureInitialized();
+    const rooms = roomIds.map((roomId) => {
+      const room = roomForId(roomId);
+      if (room === undefined) throw new GuestQrRoomNotFoundError();
+      return room;
+    });
     const issuedAt = new Date().toISOString();
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
-        `
-          UPDATE guest_room_qr_tokens
-          SET active = false, revoked_at = $2::timestamptz
-          WHERE room_id = $1::uuid AND active = true
-        `,
-        [room.id, issuedAt],
-      );
-      const result = await client.query<GuestQrTokenRow>(
-        `
-          INSERT INTO guest_room_qr_tokens
-            (id, room_id, token_hash, active, created_at, revoked_at)
-          VALUES ($1::uuid, $2::uuid, $3, true, $4::timestamptz, NULL)
-          RETURNING id, room_id, token_hash, active, created_at, revoked_at
-        `,
-        [randomUUID(), room.id, tokenHash, issuedAt],
-      );
+      const issued: IssuedGuestQrToken[] = [];
+      for (const room of rooms) {
+        await client.query(
+          `
+            UPDATE guest_room_qr_tokens
+            SET active = false, revoked_at = $2::timestamptz
+            WHERE room_id = $1::uuid AND active = true
+          `,
+          [room.id, issuedAt],
+        );
+        const token = randomBytes(32).toString('base64url');
+        const result = await client.query<GuestQrTokenRow>(
+          `
+            INSERT INTO guest_room_qr_tokens
+              (id, room_id, token_hash, active, created_at, revoked_at)
+            VALUES ($1::uuid, $2::uuid, $3, true, $4::timestamptz, NULL)
+            RETURNING id, room_id, token_hash, active, created_at, revoked_at
+          `,
+          [randomUUID(), room.id, hashGuestAccessToken(token), issuedAt],
+        );
+        issued.push({ record: this.toRecord(result.rows[0] as GuestQrTokenRow), token });
+      }
       await client.query('COMMIT');
-      return { record: this.toRecord(result.rows[0] as GuestQrTokenRow), token };
+      return issued;
     } catch (error) {
       await this.rollback(client);
       throw error;
@@ -182,6 +210,20 @@ export class PostgresGuestQrTokenRepository implements GuestQrTokenRepository, O
         LIMIT 1
       `,
       [hashGuestAccessToken(token)],
+    );
+    return result.rows[0] === undefined ? null : this.toRecord(result.rows[0]);
+  }
+
+  public async findActiveForRoom(roomId: string): Promise<GuestQrTokenRecord | null> {
+    await this.ensureInitialized();
+    const result = await this.pool.query<GuestQrTokenRow>(
+      `
+        SELECT id, room_id, token_hash, active, created_at, revoked_at
+        FROM guest_room_qr_tokens
+        WHERE room_id = $1::uuid AND active = true
+        LIMIT 1
+      `,
+      [roomId],
     );
     return result.rows[0] === undefined ? null : this.toRecord(result.rows[0]);
   }

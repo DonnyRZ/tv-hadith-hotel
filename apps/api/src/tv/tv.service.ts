@@ -5,12 +5,18 @@ import { ApiException } from '../auth/api-exception';
 import { RECEPTIONIST_REPOSITORY } from '../receptionist/receptionist.repository';
 import type { ReceptionistRepository } from '../receptionist/receptionist.repository';
 import { TV_DEVICE_REPOSITORY } from './tv-device.repository';
-import type { TvDeviceRepository } from './tv-device.repository';
+import {
+  TvDeviceRoomConflictError,
+  TvDeviceRoomNotFoundError,
+  type TvDeviceRepository,
+} from './tv-device.repository';
 import type {
   ClaimTvProvisioningInput,
+  ListTvDevicesInput,
   PairTvDeviceInput,
   StartTvProvisioningInput,
   TvContext,
+  TvDeviceAdminView,
   TvDevicePublic,
   TvDeviceRecord,
 } from './tv.types';
@@ -50,7 +56,19 @@ export class TvService {
     const record = await this.requirePairingCode(input.pairingCode);
     this.assertNotExpired(record);
     const pairedAt = new Date().toISOString();
-    const paired = await this.repository.pair(record.id, input, pairedAt);
+    let paired: TvDeviceRecord;
+    try {
+      paired = await this.repository.pair(record.id, input, pairedAt);
+    } catch (error) {
+      if (error instanceof TvDeviceRoomNotFoundError) throw this.roomNotFound();
+      if (error instanceof TvDeviceRoomConflictError) {
+        throw new ApiException(HttpStatus.CONFLICT, {
+          code: 'TV_ROOM_ALREADY_PAIRED',
+          message: 'This room already has an active TV device.',
+        });
+      }
+      throw error;
+    }
 
     return {
       device: this.toPublicDevice(paired),
@@ -149,6 +167,23 @@ export class TvService {
     };
   }
 
+  public async listDevices(input: ListTvDevicesInput) {
+    const page = input.page < 1 ? 1 : input.page;
+    const pageSize = Math.min(100, Math.max(1, input.pageSize));
+    const result = await this.repository.list({
+      page,
+      pageSize,
+      ...(input.roomId === undefined ? {} : { roomId: input.roomId }),
+      ...(input.status === undefined ? {} : { status: input.status }),
+    });
+    return {
+      items: result.items.map((record) => this.toAdminDevice(record)),
+      page,
+      pageSize,
+      total: result.total,
+    };
+  }
+
   private async requirePairingCode(pairingCode: string): Promise<TvDeviceRecord> {
     const record = await this.repository.findByPairingCode(pairingCode);
     if (record === null) {
@@ -208,5 +243,29 @@ export class TvService {
       deviceCode: record.deviceCode,
       room: record.room,
     };
+  }
+
+  private toAdminDevice(record: TvDeviceRecord): TvDeviceAdminView {
+    return {
+      id: record.id,
+      deviceCode: record.deviceCode,
+      status: record.status,
+      room: record.room,
+      pairingExpiresAt: record.pairingExpiresAt,
+      deviceModel: record.deviceModel,
+      appVersion: record.appVersion,
+      androidApiLevel: record.androidApiLevel,
+      createdAt: record.createdAt,
+      pairedAt: record.pairedAt,
+      claimedAt: record.claimedAt,
+      revokedAt: record.revokedAt,
+    };
+  }
+
+  private roomNotFound(): ApiException {
+    return new ApiException(HttpStatus.NOT_FOUND, {
+      code: 'ROOM_NOT_FOUND',
+      message: 'The requested guest room does not exist.',
+    });
   }
 }

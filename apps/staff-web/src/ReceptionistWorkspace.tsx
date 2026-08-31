@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { FormEvent } from 'react';
 
-import { managementApi, StaffApiError } from './management-api';
+import { managementApi, StaffApiError, type IssuedGuestQr } from './management-api';
 import { AdminBrandMark, AdminLanguageSwitcher, ArrowIcon, getInitials } from './CafeWorkspace';
+import { BulkQrSheet, RoomOperations } from './ReceptionistRoomOperations';
 import {
   getReceptionistRoomsForView,
   getReceptionistTotalPages,
@@ -22,6 +23,7 @@ import type { AuthCopy, Language, ReceptionistCopy } from './i18n';
 interface StaffUser {
   displayName: string;
   roles: string[];
+  permissions: string[];
 }
 
 export interface ReceptionistWorkspaceProps {
@@ -210,9 +212,13 @@ function RoomDrawer({
   onCheckout,
   onClose,
   onUpdate,
+  canManageQr,
+  canPairTv,
   room,
 }: {
   busy: RoomMutation;
+  canManageQr: boolean;
+  canPairTv: boolean;
   copy: ReceptionistCopy;
   error: string;
   onAssign: (roomId: string, guestName: string, stayDays: number) => Promise<void>;
@@ -459,6 +465,13 @@ function RoomDrawer({
               </div>
             </form>
           )}
+
+          <RoomOperations
+            canManageQr={canManageQr}
+            canPairTv={canPairTv}
+            copy={copy}
+            room={{ id: room.id, number: room.number }}
+          />
         </div>
       </aside>
     </div>
@@ -528,7 +541,12 @@ export function ReceptionistWorkspace({
   const [mutation, setMutation] = useState<RoomMutation>(null);
   const [drawerError, setDrawerError] = useState('');
   const [toast, setToast] = useState('');
+  const [bulkQrItems, setBulkQrItems] = useState<IssuedGuestQr[] | null>(null);
+  const [bulkQrBusy, setBulkQrBusy] = useState(false);
+  const [bulkQrError, setBulkQrError] = useState('');
   const isSearchingAllFloors = search.trim().length > 0;
+  const canPairTv = user.permissions.includes('receptionist:tv:pair');
+  const canManageQr = user.permissions.includes('receptionist:guest:assign');
 
   const loadRooms = useCallback(async () => {
     setLoadState('loading');
@@ -598,6 +616,20 @@ export function ReceptionistWorkspace({
     setToast(message);
     setDrawerError('');
     setSelectedRoom(null);
+  }
+
+  async function generateBulkQrSheet() {
+    if (!canManageQr || rooms.length === 0 || !window.confirm(copy.qrSheetConfirm)) return;
+    setBulkQrBusy(true);
+    setBulkQrError('');
+    try {
+      const response = await managementApi.issueGuestQrBatch(rooms.map((room) => room.id));
+      setBulkQrItems(response.items);
+    } catch (error) {
+      setBulkQrError(roomMutationError(error, copy));
+    } finally {
+      setBulkQrBusy(false);
+    }
   }
 
   async function assignGuest(roomId: string, guestName: string, stayDays: number) {
@@ -736,6 +768,21 @@ export function ReceptionistWorkspace({
                   value={search}
                 />
               </label>
+              {canManageQr && (
+                <button
+                  className="admin-button admin-button--quiet receptionist-bulk-qr-button"
+                  disabled={loadState !== 'ready' || bulkQrBusy}
+                  onClick={() => void generateBulkQrSheet()}
+                  type="button"
+                >
+                  {bulkQrBusy ? copy.qrSheetGenerating : copy.qrSheet}
+                </button>
+              )}
+              {bulkQrError.length > 0 && (
+                <p className="admin-form-error receptionist-bulk-qr-error" role="alert">
+                  {bulkQrError}
+                </p>
+              )}
             </div>
 
             <div
@@ -847,6 +894,8 @@ export function ReceptionistWorkspace({
       {selectedRoom !== null && (
         <RoomDrawer
           busy={mutation}
+          canManageQr={canManageQr}
+          canPairTv={canPairTv}
           copy={copy}
           error={drawerError}
           onAssign={assignGuest}
@@ -864,6 +913,10 @@ export function ReceptionistWorkspace({
           <CheckIcon />
           <span>{toast}</span>
         </div>
+      )}
+
+      {bulkQrItems !== null && (
+        <BulkQrSheet copy={copy} items={bulkQrItems} onClose={() => setBulkQrItems(null)} />
       )}
     </div>
   );

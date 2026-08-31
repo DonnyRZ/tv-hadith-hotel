@@ -191,6 +191,52 @@ export interface ReceptionistCopy {
   pageOf: (page: number, totalPages: number) => string;
   noRooms: string;
   noRoomsDescription: string;
+  tvSection: string;
+  tvDescription: string;
+  tvStatus: string;
+  tvStatusPending: string;
+  tvStatusPaired: string;
+  tvStatusClaimed: string;
+  tvStatusRevoked: string;
+  tvNotPaired: string;
+  tvPairingCode: string;
+  tvPairingCodePlaceholder: string;
+  tvPairingCodeInvalid: string;
+  tvPair: string;
+  tvPairing: string;
+  tvWaitingForTv: string;
+  tvPairSuccess: string;
+  tvReset: string;
+  tvRevoke: string;
+  tvResetConfirm: string;
+  tvRevokeConfirm: string;
+  tvResetSuccess: string;
+  tvRevokeSuccess: string;
+  tvRoomAlreadyPaired: string;
+  tvPairingExpired: string;
+  tvDeviceModel: string;
+  tvAppVersion: string;
+  qrSection: string;
+  qrDescription: string;
+  qrActive: string;
+  qrNotIssued: string;
+  issueQr: string;
+  reissueQr: string;
+  revokeQr: string;
+  printQr: string;
+  issuingQr: string;
+  revokingQr: string;
+  qrReissueConfirm: string;
+  qrRevokeConfirm: string;
+  qrIssueSuccess: string;
+  qrRevokeSuccess: string;
+  qrSheet: string;
+  qrSheetDescription: string;
+  qrSheetConfirm: string;
+  qrSheetGenerating: string;
+  qrSheetPrint: string;
+  qrSheetClose: string;
+  qrCodeAlt: (room: string) => string;
 }
 
 export type CatalogUnit = 'CAFE' | 'RESTAURANT' | 'LOUNGE' | 'SPA' | 'BEAUTY_AND_SALON';
@@ -876,6 +922,52 @@ export const translations: Record<Language, AuthCopy> = {
       pageOf: (page, totalPages) => `${page} / ${totalPages}-sahifa`,
       noRooms: 'Xonalar topilmadi',
       noRoomsDescription: 'Qidiruvni o‘zgartirib ko‘ring.',
+      tvSection: 'TV qurilmasi',
+      tvDescription: 'TV ekranidagi kodni kiriting va uni shu xonaga biriktiring.',
+      tvStatus: 'TV holati',
+      tvStatusPending: 'Tasdiq kutilmoqda',
+      tvStatusPaired: 'Biriktirilgan',
+      tvStatusClaimed: 'Faol',
+      tvStatusRevoked: 'Bekor qilingan',
+      tvNotPaired: 'Bu xonaga TV biriktirilmagan.',
+      tvPairingCode: 'TV pairing kodi',
+      tvPairingCodePlaceholder: '6 xonali kod',
+      tvPairingCodeInvalid: '6 xonali pairing kodini kiriting.',
+      tvPair: 'TV ni biriktirish',
+      tvPairing: 'Biriktirilmoqda…',
+      tvWaitingForTv: 'TV tasdiqlashi kutilmoqda…',
+      tvPairSuccess: 'TV xonaga biriktirildi.',
+      tvReset: 'Qayta ulash',
+      tvRevoke: 'Bekor qilish',
+      tvResetConfirm: 'TV pairingini qayta boshlaysizmi? TV yangi kod ko‘rsatadi.',
+      tvRevokeConfirm: 'Bu TV credentialini bekor qilasizmi?',
+      tvResetSuccess: 'TV qayta pairing uchun tayyor.',
+      tvRevokeSuccess: 'TV credentiali bekor qilindi.',
+      tvRoomAlreadyPaired: 'Bu xonada faol TV allaqachon biriktirilgan.',
+      tvPairingExpired: 'Pairing kodi eskirgan. TV da yangi kodni oching.',
+      tvDeviceModel: 'Model',
+      tvAppVersion: 'Ilova versiyasi',
+      qrSection: 'Mehmon QR kodi',
+      qrDescription: 'QR kodni chop eting va xonaga joylashtiring.',
+      qrActive: 'Faol QR kod mavjud.',
+      qrNotIssued: 'QR kod hali chiqarilmagan.',
+      issueQr: 'QR chiqarish',
+      reissueQr: 'QR ni qayta chiqarish',
+      revokeQr: 'QR ni bekor qilish',
+      printQr: 'QR ni chop etish',
+      issuingQr: 'QR chiqarilmoqda…',
+      revokingQr: 'Bekor qilinmoqda…',
+      qrReissueConfirm: 'Eski QR kod ishlamay qoladi. Yangi QR kod chiqarilsinmi?',
+      qrRevokeConfirm: 'Bu xonaning QR kodini bekor qilasizmi?',
+      qrIssueSuccess: 'Yangi QR kod tayyor.',
+      qrRevokeSuccess: 'QR kod bekor qilindi.',
+      qrSheet: 'Barcha QR kodlar',
+      qrSheetDescription: '114 ta xona uchun QR kodlarni bir martada chiqarish va chop etish.',
+      qrSheetConfirm: 'Faol QR kodlar yangilanadi. 114 ta yangi QR kod chiqarilsinmi?',
+      qrSheetGenerating: 'Barcha QR kodlar chiqarilmoqda…',
+      qrSheetPrint: 'Varaqni chop etish',
+      qrSheetClose: 'Yopish',
+      qrCodeAlt: (room) => `${room}-xona mehmon QR kodi`,
     },
   },
   ru: {
@@ -1289,6 +1381,52 @@ export const translations: Record<Language, AuthCopy> = {
       pageOf: (page, totalPages) => `Страница ${page} из ${totalPages}`,
       noRooms: 'Номера не найдены',
       noRoomsDescription: 'Измените поисковый запрос и попробуйте снова.',
+      tvSection: 'TV устройства',
+      tvDescription: 'Введите код на экране TV и привяжите устройство к этому номеру.',
+      tvStatus: 'Статус TV',
+      tvStatusPending: 'Ожидает подтверждения',
+      tvStatusPaired: 'Привязан',
+      tvStatusClaimed: 'Активен',
+      tvStatusRevoked: 'Отозван',
+      tvNotPaired: 'К этому номеру TV не привязан.',
+      tvPairingCode: 'Код pairing TV',
+      tvPairingCodePlaceholder: '6-значный код',
+      tvPairingCodeInvalid: 'Введите 6-значный код pairing.',
+      tvPair: 'Привязать TV',
+      tvPairing: 'Привязка…',
+      tvWaitingForTv: 'Ожидание подтверждения TV…',
+      tvPairSuccess: 'TV привязан к номеру.',
+      tvReset: 'Подключить заново',
+      tvRevoke: 'Отозвать',
+      tvResetConfirm: 'Начать pairing TV заново? На TV появится новый код.',
+      tvRevokeConfirm: 'Отозвать credential этого TV?',
+      tvResetSuccess: 'TV готов к повторному pairing.',
+      tvRevokeSuccess: 'Credential TV отозван.',
+      tvRoomAlreadyPaired: 'К этому номеру уже привязан активный TV.',
+      tvPairingExpired: 'Срок кода истёк. Откройте новый код на TV.',
+      tvDeviceModel: 'Модель',
+      tvAppVersion: 'Версия приложения',
+      qrSection: 'QR-код гостя',
+      qrDescription: 'Распечатайте QR-код и разместите его в номере.',
+      qrActive: 'Активный QR-код выпущен.',
+      qrNotIssued: 'QR-код ещё не выпущен.',
+      issueQr: 'Выпустить QR',
+      reissueQr: 'Выпустить заново',
+      revokeQr: 'Отозвать QR',
+      printQr: 'Печать QR',
+      issuingQr: 'Выпуск QR…',
+      revokingQr: 'Отзыв…',
+      qrReissueConfirm: 'Старый QR перестанет работать. Выпустить новый QR?',
+      qrRevokeConfirm: 'Отозвать QR-код этого номера?',
+      qrIssueSuccess: 'Новый QR-код готов.',
+      qrRevokeSuccess: 'QR-код отозван.',
+      qrSheet: 'Все QR-коды',
+      qrSheetDescription: 'Выпустить и распечатать QR-коды для всех 114 номеров.',
+      qrSheetConfirm: 'Активные QR-коды будут заменены. Выпустить 114 новых QR-кодов?',
+      qrSheetGenerating: 'Выпуск QR-кодов для всех номеров…',
+      qrSheetPrint: 'Распечатать лист',
+      qrSheetClose: 'Закрыть',
+      qrCodeAlt: (room) => `QR-код гостя для номера ${room}`,
     },
   },
   en: {
@@ -1697,6 +1835,52 @@ export const translations: Record<Language, AuthCopy> = {
       pageOf: (page, totalPages) => `Page ${page} of ${totalPages}`,
       noRooms: 'No rooms found',
       noRoomsDescription: 'Change your search and try again.',
+      tvSection: 'TV device',
+      tvDescription: 'Enter the code shown on the TV and map it to this room.',
+      tvStatus: 'TV status',
+      tvStatusPending: 'Waiting for confirmation',
+      tvStatusPaired: 'Paired',
+      tvStatusClaimed: 'Active',
+      tvStatusRevoked: 'Revoked',
+      tvNotPaired: 'No TV is paired with this room.',
+      tvPairingCode: 'TV pairing code',
+      tvPairingCodePlaceholder: '6-digit code',
+      tvPairingCodeInvalid: 'Enter the 6-digit pairing code.',
+      tvPair: 'Pair TV',
+      tvPairing: 'Pairing…',
+      tvWaitingForTv: 'Waiting for the TV to confirm…',
+      tvPairSuccess: 'TV paired to the room.',
+      tvReset: 'Pair again',
+      tvRevoke: 'Revoke',
+      tvResetConfirm: 'Restart TV pairing? The TV will show a new code.',
+      tvRevokeConfirm: 'Revoke this TV credential?',
+      tvResetSuccess: 'TV is ready for pairing again.',
+      tvRevokeSuccess: 'TV credential revoked.',
+      tvRoomAlreadyPaired: 'This room already has an active TV.',
+      tvPairingExpired: 'The pairing code expired. Open a new code on the TV.',
+      tvDeviceModel: 'Model',
+      tvAppVersion: 'App version',
+      qrSection: 'Guest QR code',
+      qrDescription: 'Print the QR code and place it in the room.',
+      qrActive: 'An active QR code is issued.',
+      qrNotIssued: 'No QR code has been issued yet.',
+      issueQr: 'Issue QR',
+      reissueQr: 'Reissue QR',
+      revokeQr: 'Revoke QR',
+      printQr: 'Print QR',
+      issuingQr: 'Issuing QR…',
+      revokingQr: 'Revoking…',
+      qrReissueConfirm: 'The old QR will stop working. Issue a new QR code?',
+      qrRevokeConfirm: 'Revoke this room’s QR code?',
+      qrIssueSuccess: 'New QR code ready.',
+      qrRevokeSuccess: 'QR code revoked.',
+      qrSheet: 'All room QR codes',
+      qrSheetDescription: 'Issue and print QR codes for all 114 rooms at once.',
+      qrSheetConfirm: 'Active QR codes will be replaced. Issue 114 new QR codes?',
+      qrSheetGenerating: 'Issuing QR codes for all rooms…',
+      qrSheetPrint: 'Print sheet',
+      qrSheetClose: 'Close',
+      qrCodeAlt: (room) => `Guest QR code for room ${room}`,
     },
   },
 };

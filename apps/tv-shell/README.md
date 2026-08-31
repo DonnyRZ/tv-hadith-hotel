@@ -34,8 +34,11 @@ wrapper from this directory:
 .\gradlew.bat :app:lintDebug
 ```
 
-Release builds require `signing.properties` and a real keystore outside source
-control; never commit credentials. Keep the same signing key for all updates.
+Release builds require `signing.properties` or all of the ephemeral
+`TV_SIGNING_STORE_FILE`, `TV_SIGNING_STORE_PASSWORD`, `TV_SIGNING_KEY_ALIAS`,
+and `TV_SIGNING_KEY_PASSWORD` environment variables, plus a real keystore
+outside source control; never commit credentials. Keep the same signing key
+for all updates.
 Release packaging also requires an HTTPS API base URL, verifies the APK with
 `apksigner`, and prints both the APK checksum and signing certificate details.
 For a release artifact, run the repository-root packaging script:

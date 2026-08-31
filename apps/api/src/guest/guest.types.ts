@@ -52,3 +52,10 @@ export interface IssuedGuestQrToken {
   record: GuestQrTokenRecord;
   token: string;
 }
+
+export interface GuestQrRoomStatus {
+  room: RoomReference;
+  active: boolean;
+  issuedAt: string | null;
+  revokedAt: string | null;
+}

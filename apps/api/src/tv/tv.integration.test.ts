@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -220,5 +221,48 @@ describe('Smart TV provisioning API', () => {
       })
       .expect(200);
     expect(restarted.body.pairingCode).toEqual(expect.stringMatching(/^\d{6}$/));
+  });
+
+  it('lists paired devices without returning device credentials or secret hashes', async () => {
+    const installationId = 'installation-list-unique';
+    const roomId = randomUUID();
+    const roomNumber = '418';
+    const startResponse = await request(app.getHttpServer())
+      .post('/api/v1/tv/provisioning/start')
+      .send({
+        installationId,
+        appVersion: '0.1.0-debug',
+        deviceModel: 'Reference Google TV',
+        androidApiLevel: 36,
+      })
+      .expect(200);
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .post('/api/v1/auth/staff/login')
+      .send({ email: 'receptionist@hadith-hotel.com', password: 'password' })
+      .expect(200);
+    await agent
+      .post('/api/v1/receptionist/tv-devices/pair')
+      .send({
+        pairingCode: startResponse.body.pairingCode as string,
+        roomId,
+        roomNumber,
+      })
+      .expect(200);
+
+    const response = await agent
+      .get('/api/v1/receptionist/tv-devices')
+      .query({ roomId, page: 1, pageSize: 10 })
+      .expect(200);
+    expect(response.body).toMatchObject({ page: 1, pageSize: 10, total: 1 });
+    expect(response.body.items[0]).toMatchObject({
+      id: startResponse.body.deviceId,
+      deviceCode: startResponse.body.deviceCode,
+      status: 'PAIRED',
+      room: { id: roomId, number: roomNumber },
+    });
+    expect(response.body.items[0]).not.toHaveProperty('credential');
+    expect(response.body.items[0]).not.toHaveProperty('credentialHash');
+    expect(response.body.items[0]).not.toHaveProperty('pairingCodeHash');
   });
 });

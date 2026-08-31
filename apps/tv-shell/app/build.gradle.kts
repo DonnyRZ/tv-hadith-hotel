@@ -30,15 +30,31 @@ if (signingPropertiesFile.isFile) {
     signingPropertiesFile.inputStream().use(signingProperties::load)
 }
 
-fun requiredSigningProperty(name: String): String = signingProperties.getProperty(name)
+val signingEnvironmentNames = mapOf(
+    "storeFile" to "TV_SIGNING_STORE_FILE",
+    "storePassword" to "TV_SIGNING_STORE_PASSWORD",
+    "keyAlias" to "TV_SIGNING_KEY_ALIAS",
+    "keyPassword" to "TV_SIGNING_KEY_PASSWORD",
+)
+
+fun configuredSigningProperty(name: String): String? = signingProperties.getProperty(name)
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
+    ?: signingEnvironmentNames[name]?.let { environmentName ->
+        providers.environmentVariable(environmentName).orNull
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
+fun requiredSigningProperty(name: String): String = configuredSigningProperty(name)
     ?: throw GradleException(
-        "Missing '$name' in ${signingPropertiesFile.absolutePath}. " +
-            "Use an ignored signing.properties file with a keystore outside source control.",
+        "Missing signing property '$name'. Provide ${signingPropertiesFile.absolutePath} " +
+            "or the corresponding TV_SIGNING_* environment variable.",
     )
 
-val hasReleaseSigning = signingPropertiesFile.isFile
+val hasReleaseSigning = signingPropertiesFile.isFile || signingEnvironmentNames.values.any { name ->
+    providers.environmentVariable(name).orNull?.trim()?.isNotEmpty() == true
+}
 
 android {
     namespace = "com.roomservice.tv"
@@ -106,8 +122,8 @@ android {
 fun validateReleaseConfiguration() {
     if (!hasReleaseSigning) {
         throw GradleException(
-            "Release builds must be signed. Create apps/tv-shell/signing.properties " +
-                "with a real keystore outside source control.",
+            "Release builds must be signed. Provide apps/tv-shell/signing.properties " +
+                "or all TV_SIGNING_* environment variables with a real keystore outside source control.",
         )
     }
 

@@ -363,4 +363,39 @@ describe('guest context, catalog, and request API', () => {
       .set('X-Guest-Access-Token', token)
       .expect(401);
   });
+
+  it('issues an atomic QR batch and exposes only per-room QR metadata', async () => {
+    const receptionist = await login('receptionist@hadith-hotel.com');
+    const roomIds = ['204', '205'].map(roomIdForNumber);
+    const issued = await receptionist
+      .post('/api/v1/receptionist/guest-access-tokens/batch')
+      .send({ roomIds })
+      .expect(200);
+
+    expect(issued.body.items).toHaveLength(2);
+    expect(issued.body.items[0].qrUrl).toContain('access_token=');
+    expect(issued.body.items[1].qrUrl).toContain('access_token=');
+
+    const status = await receptionist
+      .get(`/api/v1/receptionist/rooms/${roomIds[0]}/guest-access-token`)
+      .expect(200);
+    expect(status.body).toMatchObject({
+      room: { id: roomIds[0], number: '204' },
+      active: true,
+      issuedAt: expect.any(String),
+      revokedAt: null,
+    });
+    expect(status.body).not.toHaveProperty('qrUrl');
+    expect(status.body).not.toHaveProperty('token');
+
+    await receptionist
+      .post('/api/v1/receptionist/guest-access-tokens/batch')
+      .send({ roomIds: [roomIds[0], roomIdForNumber('999')] })
+      .expect(404);
+
+    const statusAfterRejectedBatch = await receptionist
+      .get(`/api/v1/receptionist/rooms/${roomIds[0]}/guest-access-token`)
+      .expect(200);
+    expect(statusAfterRejectedBatch.body.issuedAt).toBe(status.body.issuedAt);
+  });
 });

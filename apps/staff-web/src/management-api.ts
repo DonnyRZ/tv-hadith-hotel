@@ -172,6 +172,36 @@ export interface ReceptionistRoomListOptions {
   pageSize?: number;
 }
 
+export type TvProvisioningStatus = 'PENDING' | 'PAIRED' | 'CLAIMED' | 'REVOKED';
+
+export interface ManagedTvDevice {
+  id: string;
+  deviceCode: string;
+  status: TvProvisioningStatus;
+  room: { id: string; number: string } | null;
+  pairingExpiresAt: string;
+  deviceModel: string;
+  appVersion: string;
+  androidApiLevel: number;
+  createdAt: string;
+  pairedAt: string | null;
+  claimedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface GuestQrRoomStatus {
+  room: { id: string; number: string };
+  active: boolean;
+  issuedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface IssuedGuestQr {
+  room: { id: string; number: string };
+  qrUrl: string;
+  issuedAt: string;
+}
+
 export interface CreateMenuItemInput {
   unit: MenuUnit;
   kind: MenuItemKind;
@@ -285,6 +315,19 @@ function withReceptionistRoomQuery(path: string, options: ReceptionistRoomListOp
   return encodedQuery.length === 0 ? path : `${path}?${encodedQuery}`;
 }
 
+function withTvDeviceQuery(
+  path: string,
+  options: { roomId?: string; status?: TvProvisioningStatus; page?: number; pageSize?: number },
+): string {
+  const query = new URLSearchParams();
+  if (options.roomId !== undefined) query.set('roomId', options.roomId);
+  if (options.status !== undefined) query.set('status', options.status);
+  if (options.page !== undefined) query.set('page', String(options.page));
+  if (options.pageSize !== undefined) query.set('pageSize', String(options.pageSize));
+  const encodedQuery = query.toString();
+  return encodedQuery.length === 0 ? path : `${path}?${encodedQuery}`;
+}
+
 export const managementApi = {
   listUsers: () => request<{ items: ManagedUser[] }>('/management/users'),
   createUser: (input: CreateUserInput) =>
@@ -359,6 +402,50 @@ export const managementApi = {
   },
   getReceptionistRoom: (id: string) =>
     request<ReceptionistRoom>(`/receptionist/rooms/${encodeURIComponent(id)}`),
+  listTvDevices: (
+    options: {
+      roomId?: string;
+      status?: TvProvisioningStatus;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) =>
+    request<{ items: ManagedTvDevice[]; page: number; pageSize: number; total: number }>(
+      withTvDeviceQuery('/receptionist/tv-devices', options),
+    ),
+  pairTvDevice: (pairingCode: string, roomId: string, roomNumber: string) =>
+    request<{ device: ManagedTvDevice; pairedAt: string }>('/receptionist/tv-devices/pair', {
+      method: 'POST',
+      body: JSON.stringify({ pairingCode, roomId, roomNumber }),
+    }),
+  resetTvDevice: (deviceId: string) =>
+    request<{ deviceId: string; status: 'PENDING'; pairingExpiresAt: string }>(
+      `/receptionist/tv-devices/${encodeURIComponent(deviceId)}/reset`,
+      { method: 'POST' },
+    ),
+  revokeTvDevice: (deviceId: string) =>
+    request<{ deviceId: string; status: 'REVOKED'; revokedAt: string }>(
+      `/receptionist/tv-devices/${encodeURIComponent(deviceId)}/revoke`,
+      { method: 'POST' },
+    ),
+  getGuestQrStatus: (roomId: string) =>
+    request<GuestQrRoomStatus>(
+      `/receptionist/rooms/${encodeURIComponent(roomId)}/guest-access-token`,
+    ),
+  issueGuestQr: (roomId: string) =>
+    request<IssuedGuestQr>(`/receptionist/rooms/${encodeURIComponent(roomId)}/guest-access-token`, {
+      method: 'POST',
+    }),
+  revokeGuestQr: (roomId: string) =>
+    request<{ room: { id: string; number: string }; revoked: boolean; revokedAt: string | null }>(
+      `/receptionist/rooms/${encodeURIComponent(roomId)}/guest-access-token/revoke`,
+      { method: 'POST' },
+    ),
+  issueGuestQrBatch: (roomIds: string[]) =>
+    request<{ items: IssuedGuestQr[] }>('/receptionist/guest-access-tokens/batch', {
+      method: 'POST',
+      body: JSON.stringify({ roomIds }),
+    }),
   assignGuestToRoom: (roomId: string, guestName: string, stayDays: number) =>
     request<GuestAssignment>(`/receptionist/rooms/${encodeURIComponent(roomId)}/guest-assignment`, {
       method: 'POST',

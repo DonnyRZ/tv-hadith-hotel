@@ -395,6 +395,41 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
+  /receptionist/tv-devices:
+    get:
+      tags: [Receptionist]
+      operationId: listTvDevices
+      summary: List TV devices managed by the receptionist
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: roomId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TvProvisioningStatus'
+      responses:
+        '200':
+          description: TV devices without credentials or pairing secrets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TvDeviceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
   /receptionist/tv-devices/pair:
     post:
       tags: [Receptionist]
@@ -787,6 +822,28 @@ paths:
           $ref: '#/components/responses/AssignmentConflict'
 
   /receptionist/rooms/{roomId}/guest-access-token:
+    get:
+      tags: [Receptionist]
+      operationId: getGuestAccessTokenStatus
+      summary: Get the room QR access status
+      description: Returns QR metadata only. The opaque token is never returned by this endpoint.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Current QR status for the room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestQrRoomStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
     post:
       tags: [Receptionist]
       operationId: issueGuestAccessToken
@@ -830,6 +887,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RevokeGuestAccessTokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/guest-access-tokens/batch:
+    post:
+      tags: [Receptionist]
+      operationId: issueGuestAccessTokensBatch
+      summary: Issue room QR access URLs in one transaction
+      description: Rotates one opaque QR token for each requested room. The operation is atomic.
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchGuestAccessTokenRequest'
+      responses:
+        '200':
+          description: QR URLs generated for all requested rooms.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchGuestAccessTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1925,6 +2012,43 @@ components:
         issuedAt:
           type: string
           format: date-time
+    GuestQrRoomStatus:
+      type: object
+      required: [room, active, issuedAt, revokedAt]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        active:
+          type: boolean
+        issuedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+    BatchGuestAccessTokenRequest:
+      type: object
+      required: [roomIds]
+      properties:
+        roomIds:
+          type: array
+          minItems: 1
+          maxItems: 114
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    BatchGuestAccessTokenResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/GuestAccessTokenResponse'
     RevokeGuestAccessTokenResponse:
       type: object
       required: [room, revoked, revokedAt]
@@ -1949,6 +2073,80 @@ components:
           example: device_a83ks9
         room:
           $ref: '#/components/schemas/RoomReference'
+    TvProvisioningStatus:
+      type: string
+      enum: [PENDING, PAIRED, CLAIMED, REVOKED]
+    TvDeviceAdmin:
+      type: object
+      required:
+        - id
+        - deviceCode
+        - status
+        - room
+        - pairingExpiresAt
+        - deviceModel
+        - appVersion
+        - androidApiLevel
+        - createdAt
+        - pairedAt
+        - claimedAt
+        - revokedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        deviceCode:
+          type: string
+        status:
+          $ref: '#/components/schemas/TvProvisioningStatus'
+        room:
+          type: object
+          nullable: true
+          required: [id, number]
+          properties:
+            id:
+              type: string
+              format: uuid
+            number:
+              type: string
+        pairingExpiresAt:
+          type: string
+          format: date-time
+        deviceModel:
+          type: string
+        appVersion:
+          type: string
+        androidApiLevel:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        pairedAt:
+          type: string
+          format: date-time
+          nullable: true
+        claimedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+    TvDeviceListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TvDeviceAdmin'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
     TvContext:
       type: object
       required: [device, roomStatus, welcome]
