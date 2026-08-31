@@ -6,14 +6,12 @@ ENV PATH=${PNPM_HOME}:${PATH}
 
 WORKDIR /workspace
 
-RUN --mount=type=cache,id=s/hadith-hotel-corepack,target=/tmp/corepack \
-    corepack enable \
+RUN corepack enable \
     && corepack prepare pnpm@11.19.0 --activate
 
 COPY . .
 
-RUN --mount=type=cache,id=s/hadith-hotel-pnpm-store,target=/pnpm/store \
-    pnpm install --frozen-lockfile --filter @room-service/api... \
+RUN pnpm install --frozen-lockfile --filter @room-service/api... \
     && pnpm --filter @room-service/api build \
     && pnpm --filter @room-service/api deploy --legacy --prod --strict-peer-dependencies=false /runtime \
     && cp -R apps/api/dist /runtime/dist
