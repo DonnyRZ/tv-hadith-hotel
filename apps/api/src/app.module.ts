@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 
 import { AuthModule } from './auth/auth.module';
 import { GuestModule } from './guest/guest.module';
+import { HealthModule } from './health/health.module';
 import { ManagementModule } from './management/management.module';
 import { MenuModule } from './menu/menu.module';
 import { ReceptionistModule } from './receptionist/receptionist.module';
@@ -14,6 +15,7 @@ import { TvModule } from './tv/tv.module';
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
     GuestModule,
+    HealthModule,
     ManagementModule,
     MenuModule,
     ReceptionistModule,

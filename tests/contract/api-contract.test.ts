@@ -69,6 +69,13 @@ function hasStaffSessionSecurity(selectedOperation: Operation): boolean {
 }
 
 describe('REST API contract scenarios', () => {
+  it('defines an unauthenticated health check for deployment probes', () => {
+    const health = operation('/health', 'get');
+
+    expect(health.security).toEqual([]);
+    expect(health.responses).toHaveProperty('200');
+  });
+
   it('defines the staff session lifecycle and session cookie contract', () => {
     const login = operation('/auth/staff/login', 'post');
     const logout = operation('/auth/staff/logout', 'post');

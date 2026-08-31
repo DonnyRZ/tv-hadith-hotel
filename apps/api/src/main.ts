@@ -35,7 +35,12 @@ export async function createApplication(): Promise<INestApplication> {
 async function bootstrap(): Promise<void> {
   const app = await createApplication();
   const config = app.get(ConfigService);
-  const port = Number(config.get<string>('API_PORT') ?? 3000);
+  const configuredPort = config.get<string>('PORT') ?? config.get<string>('API_PORT') ?? '3000';
+  const port = Number(configuredPort);
+
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(`PORT must be a positive integer; received "${configuredPort}"`);
+  }
 
   await app.listen(port, '0.0.0.0');
 }

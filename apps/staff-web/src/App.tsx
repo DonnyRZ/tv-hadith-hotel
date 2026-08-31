@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 
-import hotelExteriorUrl from '../../../../hadith-hotel-2/web/public/images/overview-hero/hotel-exterior.webp';
+import hotelExteriorUrl from './assets/hotel-exterior.webp';
 import { CafeDashboard } from './CafeDashboard';
 import { CafeWorkspace, CatalogWorkspace } from './CafeWorkspace';
 import { OperationalDashboard } from './OperationalDashboard';

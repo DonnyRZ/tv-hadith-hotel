@@ -75,6 +75,21 @@ The default local ports are:
 - Prometheus: 9090.
 - Loki: 3100.
 
+## Railway deployment
+
+Railway deployment uses the `EBI-TV` project and its `production` environment.
+The API, Staff Web, and Guest Web are separate services built from the
+`infrastructure/docker` Dockerfiles. Hosted services use Railway's generated
+domains and injected `PORT`; the local ports above do not become production
+configuration.
+
+The production API must use PostgreSQL through `AUTH_STORE=postgres` and
+`SESSION_STORE=postgres`. `DATABASE_URL` is a Railway secret and must be entered
+directly into the API service. Development fixtures, seed passwords, and dummy
+orders must not be configured in production. The existing database project is
+an external dependency and is not managed by this repository or by the
+`EBI-TV` Railway project.
+
 The API can be started with `pnpm --filter @room-service/api dev` after copying
 `.env.example` to `.env`. Build the native TV APK from `apps/tv-shell` with
 `./gradlew.bat :app:assembleDebug` on Windows or `./gradlew :app:assembleDebug`
