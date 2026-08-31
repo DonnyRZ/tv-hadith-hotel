@@ -6,6 +6,9 @@ ENV PATH=${PNPM_HOME}:${PATH}
 
 WORKDIR /workspace
 
+ARG VITE_API_BASE_URL=/api/v1
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
 RUN corepack enable \
     && corepack prepare pnpm@11.19.0 --activate
 
