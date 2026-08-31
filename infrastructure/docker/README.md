@@ -18,3 +18,8 @@ The two SPA images read `VITE_API_BASE_URL` during their Vite build. The SPA
 Dockerfiles declare that variable as a build argument so Railway can provide it
 to Vite. When the variable changes in a hosted environment, trigger a fresh
 source build so the new API origin is embedded in the browser bundle.
+
+The Staff Web image can optionally proxy `/api/` requests through the static
+server by setting the runtime variable `API_PROXY_TARGET` to the API origin.
+When enabled, Staff Web should be built with `VITE_API_BASE_URL=/api/v1` so
+session cookies remain same-origin with the Staff Web domain.

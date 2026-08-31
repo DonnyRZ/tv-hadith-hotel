@@ -1,4 +1,4 @@
-/* global console, process */
+/* global Buffer, Headers, URL, console, fetch, process */
 
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -31,6 +31,148 @@ const contentTypes = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
 };
+
+const proxyTarget = readProxyTarget();
+const proxyBodyLimit = 2 * 1024 * 1024;
+const hopByHopHeaders = new Set([
+  'connection',
+  'content-encoding',
+  'content-length',
+  'expect',
+  'host',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+function readProxyTarget() {
+  const configuredTarget = process.env.API_PROXY_TARGET?.trim();
+  if (configuredTarget === undefined || configuredTarget.length === 0) return null;
+
+  let target;
+  try {
+    target = new URL(configuredTarget);
+  } catch {
+    throw new Error('API_PROXY_TARGET must be a valid http(s) URL');
+  }
+
+  if (!['http:', 'https:'].includes(target.protocol)) {
+    throw new Error('API_PROXY_TARGET must use http or https');
+  }
+  if (target.username.length > 0 || target.password.length > 0 || target.search.length > 0) {
+    throw new Error('API_PROXY_TARGET must not contain credentials or a query string');
+  }
+
+  target.pathname = target.pathname.replace(/\/+$/u, '');
+  return target;
+}
+
+function shouldProxy(requestUrl) {
+  if (proxyTarget === null) return false;
+  const url = new URL(requestUrl, 'http://static-server.local');
+  return url.pathname.startsWith('/api/');
+}
+
+function proxyUrl(requestUrl) {
+  const url = new URL(requestUrl, 'http://static-server.local');
+  const target = new URL(proxyTarget);
+  const targetBasePath = proxyTarget.pathname === '/' ? '' : proxyTarget.pathname;
+  target.pathname = `${targetBasePath}${url.pathname}`;
+  target.search = url.search;
+  return target;
+}
+
+function proxyRequestHeaders(request) {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (value === undefined || hopByHopHeaders.has(name.toLowerCase())) continue;
+    headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+  }
+
+  const forwardedProtocol = request.headers['x-forwarded-proto'];
+  headers.set(
+    'x-forwarded-proto',
+    Array.isArray(forwardedProtocol)
+      ? (forwardedProtocol[0] ?? (proxyTarget.protocol === 'https:' ? 'https' : 'http'))
+      : (forwardedProtocol ?? (proxyTarget.protocol === 'https:' ? 'https' : 'http')),
+  );
+  return headers;
+}
+
+async function readProxyBody(request) {
+  const chunks = [];
+  let total = 0;
+
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > proxyBodyLimit) return null;
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks);
+}
+
+function responseHeadersFromProxy(upstream, bodyLength) {
+  const headers = {};
+  upstream.headers.forEach((value, name) => {
+    const normalizedName = name.toLowerCase();
+    if (normalizedName === 'set-cookie' || hopByHopHeaders.has(normalizedName)) return;
+    headers[name] = value;
+  });
+
+  const setCookies =
+    typeof upstream.headers.getSetCookie === 'function'
+      ? upstream.headers.getSetCookie()
+      : upstream.headers.get('set-cookie');
+  if (setCookies !== null && setCookies !== undefined && setCookies.length > 0) {
+    headers['set-cookie'] = setCookies;
+  }
+  headers['content-length'] = String(bodyLength);
+  return headers;
+}
+
+async function proxyApiRequest(request, response) {
+  const target = proxyUrl(request.url ?? '/');
+  const method = request.method ?? 'GET';
+  const hasBody = method !== 'GET' && method !== 'HEAD';
+  const body = hasBody ? await readProxyBody(request) : undefined;
+
+  if (body === null) {
+    response.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' });
+    response.end('Payload Too Large');
+    return;
+  }
+
+  try {
+    const upstream = await fetch(target, {
+      method,
+      headers: proxyRequestHeaders(request),
+      ...(body === undefined || body.length === 0 ? {} : { body, duplex: 'half' }),
+      redirect: 'manual',
+    });
+    const responseBody = Buffer.from(await upstream.arrayBuffer());
+    response.writeHead(upstream.status, responseHeadersFromProxy(upstream, responseBody.length));
+    if (method === 'HEAD') {
+      response.end();
+      return;
+    }
+    response.end(responseBody);
+  } catch {
+    response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+    response.end(
+      JSON.stringify({
+        statusCode: 502,
+        code: 'API_PROXY_UNAVAILABLE',
+        message: 'The API is temporarily unavailable.',
+      }),
+    );
+  }
+}
 
 function resolveInsideRoot(relativePath) {
   const candidate = path.resolve(rootDirectory, relativePath);
@@ -145,6 +287,11 @@ function responseHeaders(filePath, size, pathname) {
 }
 
 const server = createServer(async (request, response) => {
+  if (shouldProxy(request.url ?? '/')) {
+    await proxyApiRequest(request, response);
+    return;
+  }
+
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     response.writeHead(405, { Allow: 'GET, HEAD' });
     response.end('Method Not Allowed');
