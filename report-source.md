@@ -24,15 +24,15 @@ permission and a user confirmation; zero-touch installation is not universal.
 
 ## Source ledger
 
-| Claim used | Primary source | Why it matters |
-|---|---|---|
-| An update requires matching application identity/signing and an acceptable version code | [Android App updates](https://developer.android.com/google/play/app-updates) | Preserves installed `com.roomservice.tv` data and credential. |
-| Private-server APK distribution is supported but unknown-app permission applies on Android 8+ | [Alternative distribution](https://developer.android.com/distribute/marketing-tools/alternative-distribution) | Explains why flashdisk can be removed but the installer may still require approval. |
-| Package installation can require pending user action | [`PackageInstaller.SessionParams`](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams) | Prevents promising silent installation on an unmanaged TV. |
-| `REQUEST_INSTALL_PACKAGES` is the relevant install-request permission | [Manifest permission reference](https://developer.android.com/reference/android/Manifest.permission) | Supports the Android manifest implementation. |
-| `FileProvider`/`content://` is the secure way to share the APK with the installer | [Secure file sharing](https://developer.android.com/training/secure-file-sharing) | Avoids unsafe `file://` URIs and exposed filesystem paths. |
-| Device-owner provisioning is the managed-device route | [Android Management API provisioning](https://developers.google.com/android/management/provision-device) | Identifies the stronger future zero-touch option and its provisioning dependency. |
-| Dedicated devices have management requirements | [Dedicated-device requirements](https://developers.google.com/android/work/requirements/dedicated-device) | Confirms MDM/device-owner cannot be assumed for every existing consumer TV. |
+| Claim used                                                                                    | Primary source                                                                                                                | Why it matters                                                                      |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| An update requires matching application identity/signing and an acceptable version code       | [Android App updates](https://developer.android.com/google/play/app-updates)                                                  | Preserves installed `com.roomservice.tv` data and credential.                       |
+| Private-server APK distribution is supported but unknown-app permission applies on Android 8+ | [Alternative distribution](https://developer.android.com/distribute/marketing-tools/alternative-distribution)                 | Explains why flashdisk can be removed but the installer may still require approval. |
+| Package installation can require pending user action                                          | [`PackageInstaller.SessionParams`](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams) | Prevents promising silent installation on an unmanaged TV.                          |
+| `REQUEST_INSTALL_PACKAGES` is the relevant install-request permission                         | [Manifest permission reference](https://developer.android.com/reference/android/Manifest.permission)                          | Supports the Android manifest implementation.                                       |
+| `FileProvider`/`content://` is the secure way to share the APK with the installer             | [Secure file sharing](https://developer.android.com/training/secure-file-sharing)                                             | Avoids unsafe `file://` URIs and exposed filesystem paths.                          |
+| Device-owner provisioning is the managed-device route                                         | [Android Management API provisioning](https://developers.google.com/android/management/provision-device)                      | Identifies the stronger future zero-touch option and its provisioning dependency.   |
+| Dedicated devices have management requirements                                                | [Dedicated-device requirements](https://developers.google.com/android/work/requirements/dedicated-device)                     | Confirms MDM/device-owner cannot be assumed for every existing consumer TV.         |
 
 ## Limitations and recommendation
 

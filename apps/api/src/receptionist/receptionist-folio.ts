@@ -88,7 +88,9 @@ function sortedAmounts(amounts: Map<string, number>): ReceptionistFolioAmount[] 
     .map(([currency, amount]) => ({ currency, amount }));
 }
 
-export function summarizeFolioRequests(requests: readonly RequestRecord[]): ReceptionistFolioSummary {
+export function summarizeFolioRequests(
+  requests: readonly RequestRecord[],
+): ReceptionistFolioSummary {
   const summary = emptyReceptionistFolioSummary();
   const statusCounts = emptyStatusCounts();
   const totals = new Map<string, number>();

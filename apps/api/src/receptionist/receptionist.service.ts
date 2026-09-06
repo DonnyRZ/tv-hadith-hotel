@@ -114,11 +114,7 @@ export class ReceptionistService {
 
     const page = query.page ?? DEFAULT_PAGE;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
-    const assignments = await this.repository.listGuestAssignmentsByRoomId(
-      roomId,
-      page,
-      pageSize,
-    );
+    const assignments = await this.repository.listGuestAssignmentsByRoomId(roomId, page, pageSize);
     const requests = await this.requestRepository.listByGuestAssignmentIds(
       assignments.items.map((assignment) => assignment.id),
     );

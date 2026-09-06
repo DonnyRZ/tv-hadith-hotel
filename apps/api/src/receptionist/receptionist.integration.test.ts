@@ -219,9 +219,7 @@ describe('receptionist guest assignment API', () => {
       })
       .expect(201);
 
-    const folio = await receptionist
-      .get(`/api/v1/receptionist/rooms/${roomId}/folio`)
-      .expect(200);
+    const folio = await receptionist.get(`/api/v1/receptionist/rooms/${roomId}/folio`).expect(200);
     expect(folio.body).toMatchObject({
       room: { id: roomId, number: roomNumber },
       assignment: { id: assignmentId, guestName: 'Folio Guest', status: 'ACTIVE' },
@@ -235,8 +233,16 @@ describe('receptionist guest assignment API', () => {
     });
     expect(folio.body.orders).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: cafeOrder.body.id, unit: 'CAFE', guestAssignmentId: assignmentId }),
-        expect.objectContaining({ id: restaurantOrder.body.id, unit: 'RESTAURANT', guestAssignmentId: assignmentId }),
+        expect.objectContaining({
+          id: cafeOrder.body.id,
+          unit: 'CAFE',
+          guestAssignmentId: assignmentId,
+        }),
+        expect.objectContaining({
+          id: restaurantOrder.body.id,
+          unit: 'RESTAURANT',
+          guestAssignmentId: assignmentId,
+        }),
       ]),
     );
 

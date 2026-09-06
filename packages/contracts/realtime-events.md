@@ -36,13 +36,13 @@ The typed Staff event contract is in [`src/realtime-events.ts`](./src/realtime-e
 
 ## Staff events
 
-| Event                              | Intended consumers                      | Meaning                                      |
-| ---------------------------------- | --------------------------------------- | -------------------------------------------- |
-| `staff.request.created`            | The request's authorized unit dashboard and Receptionist folio | A new guest request was committed. |
-| `staff.request.updated`            | The request's authorized unit dashboard and Receptionist folio | A request status or terminal state changed. |
-| `staff.room.updated`               | Receptionist                            | A room assignment or checkout was committed. |
-| `staff.boutique.catalog.updated`   | Butik Indonesia                         | A category, product, or variant changed.     |
-| `staff.boutique.inventory.updated` | Butik Indonesia                         | Available inventory changed.                 |
+| Event                              | Intended consumers                                             | Meaning                                      |
+| ---------------------------------- | -------------------------------------------------------------- | -------------------------------------------- |
+| `staff.request.created`            | The request's authorized unit dashboard and Receptionist folio | A new guest request was committed.           |
+| `staff.request.updated`            | The request's authorized unit dashboard and Receptionist folio | A request status or terminal state changed.  |
+| `staff.room.updated`               | Receptionist                                                   | A room assignment or checkout was committed. |
+| `staff.boutique.catalog.updated`   | Butik Indonesia                                                | A category, product, or variant changed.     |
+| `staff.boutique.inventory.updated` | Butik Indonesia                                                | Available inventory changed.                 |
 
 Staff request events contain `roomId` and `guestAssignmentId` in addition to
 identifiers, unit/status and timestamps. They are refresh hints, not full

@@ -149,7 +149,9 @@ export function writeReceptionistRoomCache(
   }
 }
 
-export function readReceptionistFolioCache<T extends ReceptionistFolioResponse | ReceptionistFolioHistoryResponse>(
+export function readReceptionistFolioCache<
+  T extends ReceptionistFolioResponse | ReceptionistFolioHistoryResponse,
+>(
   userId: string,
   roomId: string,
   assignmentId: string | null,
@@ -170,7 +172,9 @@ export function readReceptionistFolioCache<T extends ReceptionistFolioResponse |
   }
 }
 
-export function writeReceptionistFolioCache<T extends ReceptionistFolioResponse | ReceptionistFolioHistoryResponse>(
+export function writeReceptionistFolioCache<
+  T extends ReceptionistFolioResponse | ReceptionistFolioHistoryResponse,
+>(
   userId: string,
   roomId: string,
   assignmentId: string | null,

@@ -5612,7 +5612,10 @@ button.permission-row:not(:disabled) {
   border: 1px solid var(--line);
   border-top: 0;
   background: var(--paper);
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
 
 .receptionist-master-detail .receptionist-room-card.is-vacant,
@@ -5625,7 +5628,9 @@ button.permission-row:not(:disabled) {
 .receptionist-master-detail .receptionist-room-card.is-selected {
   border-color: rgba(176, 141, 87, 0.75);
   background: #fffaf1;
-  box-shadow: inset 3px 0 0 var(--accent), 0 5px 15px rgba(176, 141, 87, 0.1);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    0 5px 15px rgba(176, 141, 87, 0.1);
 }
 
 .receptionist-room-card__select {
