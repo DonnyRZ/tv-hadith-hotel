@@ -111,10 +111,11 @@ jobs:
 
       - name: Run native TV test-only gate
         shell: bash
+        working-directory: apps/tv-shell
         run: |
           set -euo pipefail
-          chmod +x apps/tv-shell/gradlew
-          ./apps/tv-shell/gradlew :app:testDebugUnitTest :app:lintDebug \
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:lintDebug \
             -PtvTarget=emulator \
             -PtvApiBaseUrl=http://10.0.2.2:3000/api/v1/ \
             --no-daemon
