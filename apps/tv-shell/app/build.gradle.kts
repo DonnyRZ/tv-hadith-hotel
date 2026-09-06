@@ -78,6 +78,7 @@ val hasReleaseSigning = signingPropertiesFile.isFile || signingEnvironmentNames.
 
 android {
     namespace = "com.roomservice.tv"
+    // Compose 1.12/Core 1.19 require the Android 17 (API 37) compile SDK.
     compileSdk = 37
 
     defaultConfig {
