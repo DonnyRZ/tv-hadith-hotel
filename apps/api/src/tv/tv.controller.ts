@@ -103,7 +103,7 @@ export class TvController {
       ? authorization.slice('Bearer '.length).trim()
       : undefined;
     this.tvService.assertUpdateUploadAuthorization(uploadToken);
-    const body = await readRawBody(request);
+    const body = await readUploadBody(request, contentType);
     return this.tvService.uploadUpdateArtifact({
       objectPrefix,
       versionCode,
@@ -139,6 +139,20 @@ async function readRawBody(request: Request): Promise<Buffer> {
     chunks.push(buffer);
   }
   return Buffer.concat(chunks, total);
+}
+
+async function readUploadBody(request: Request, contentType: string | undefined): Promise<Buffer> {
+  const rawBody = await readRawBody(request);
+  if (rawBody.length > 0 || contentType?.toLowerCase().split(';', 1)[0] !== 'application/json') {
+    return rawBody;
+  }
+
+  // Nest's default JSON parser may consume a manifest before this CI-only
+  // endpoint reads the request stream. Re-encode the parsed value so older
+  // release runs remain retryable while the workflow sends future manifests
+  // as octet-stream.
+  if (request.body === undefined) return rawBody;
+  return Buffer.from(JSON.stringify(request.body), 'utf8');
 }
 
 function inferTvUpdateContentType(
