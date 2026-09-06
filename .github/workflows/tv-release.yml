@@ -110,11 +110,9 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        if: ${{ inputs.reuse_artifact_run_id == '' }}
         uses: android-actions/setup-android@v3
 
       - name: Install Android build packages
-        if: ${{ inputs.reuse_artifact_run_id == '' }}
         # API 37 is currently a preview package and is not on sdkmanager's
         # stable channel yet.
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
