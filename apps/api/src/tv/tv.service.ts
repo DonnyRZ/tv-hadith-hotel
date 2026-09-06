@@ -249,6 +249,10 @@ export class TvService {
     return { objectKey, byteSize: input.body.length };
   }
 
+  public assertUpdateUploadAuthorization(token: string | undefined): void {
+    this.assertUpdateUploadToken(token);
+  }
+
   public async readUpdateArtifact(input: {
     objectPrefix: string;
     versionCode: string;

@@ -99,10 +99,11 @@ export class TvController {
     @Headers('authorization') authorization: string | undefined,
     @Req() request: Request,
   ) {
-    const body = await readRawBody(request);
     const uploadToken = authorization?.startsWith('Bearer ')
       ? authorization.slice('Bearer '.length).trim()
       : undefined;
+    this.tvService.assertUpdateUploadAuthorization(uploadToken);
+    const body = await readRawBody(request);
     return this.tvService.uploadUpdateArtifact({
       objectPrefix,
       versionCode,
