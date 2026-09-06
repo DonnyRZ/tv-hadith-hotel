@@ -28,7 +28,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: egi-tv-release-${{ github.ref_name }}
+  # A single production feed exists. Two simultaneous promotions could make
+  # the API point at a manifest whose object has not finished publishing yet.
+  group: egi-tv-production-release
   cancel-in-progress: false
 
 jobs:
@@ -69,8 +71,10 @@ jobs:
       version_code: ${{ steps.resolve.outputs.version_code }}
       version_name: ${{ steps.resolve.outputs.version_name }}
       update_apk_url: ${{ steps.resolve.outputs.update_apk_url }}
+      release_id: ${{ steps.resolve.outputs.update_release_id }}
       autopublish: ${{ steps.resolve.outputs.autopublish }}
       object_prefix: ${{ steps.resolve.outputs.object_prefix }}
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
 
     env:
       RELEASE_EVENT: ${{ github.event_name }}
@@ -128,8 +132,16 @@ jobs:
           UPDATE_PUBLIC_BASE_URL: ${{ vars.TV_UPDATE_PUBLIC_BASE_URL || '' }}
           UPDATE_S3_PREFIX: ${{ vars.TV_UPDATE_S3_PREFIX || 'egi-tv' }}
           AUTOPUBLISH_ENABLED: ${{ vars.TV_UPDATE_AUTOPUBLISH_ENABLED || 'false' }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+
+          git fetch --no-tags --prune origin main
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+            echo 'The release commit must be reachable from origin/main.' >&2
+            exit 1
+          fi
 
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             version_name="${INPUT_VERSION_NAME:-}"
@@ -145,6 +157,11 @@ jobs:
             version_code="${BASH_REMATCH[3]}"
             previous_version_code="${INITIAL_PRODUCTION_VERSION_CODE:-}"
             bootstrap_only=false
+
+            if [[ "${REF_PROTECTED:-false}" != 'true' ]]; then
+              echo 'Production tag releases must run from a protected Git ref.' >&2
+              exit 1
+            fi
 
             if [[ ! "$previous_version_code" =~ ^[0-9]+$ ]]; then
               echo 'TV_INITIAL_PRODUCTION_VERSION_CODE must be a positive integer.' >&2
@@ -173,8 +190,16 @@ jobs:
             echo 'previous_version_code must be a non-negative integer.' >&2
             exit 1
           fi
+          if [[ ! "$INITIAL_PRODUCTION_VERSION_CODE" =~ ^[0-9]+$ ]]; then
+            echo 'TV_INITIAL_PRODUCTION_VERSION_CODE must be a non-negative integer.' >&2
+            exit 1
+          fi
           if (( version_code <= previous_version_code )); then
             echo "version_code $version_code must be greater than previous_version_code $previous_version_code." >&2
+            exit 1
+          fi
+          if (( version_code <= INITIAL_PRODUCTION_VERSION_CODE )); then
+            echo "version_code $version_code must be greater than the installed production baseline $INITIAL_PRODUCTION_VERSION_CODE." >&2
             exit 1
           fi
           if [[ -z "${API_BASE_URL:-}" ]]; then
@@ -204,11 +229,7 @@ jobs:
             artifact_name="egi-tv-$version_name-code-$version_code"
           fi
 
-          if [[ "$AUTOPUBLISH_ENABLED" == 'true' ]]; then
-            if [[ "$bootstrap_only" == 'true' ]]; then
-              echo 'bootstrap_only cannot be combined with TV_UPDATE_AUTOPUBLISH_ENABLED=true.' >&2
-              exit 1
-            fi
+          if [[ "$AUTOPUBLISH_ENABLED" == 'true' && "$bootstrap_only" != 'true' ]]; then
             if [[ -z "${UPDATE_PUBLIC_BASE_URL:-}" ]]; then
               echo 'TV_UPDATE_PUBLIC_BASE_URL is required when automatic publishing is enabled.' >&2
               exit 1
@@ -225,6 +246,7 @@ jobs:
             echo "update_release_id=$update_release_id"
             echo "autopublish=$autopublish"
             echo "object_prefix=$prefix"
+            echo "commit_sha=$COMMIT_SHA"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -304,6 +326,27 @@ jobs:
             echo 'Staged APK checksum does not match its release manifest.' >&2
             exit 1
           fi
+          if [[ ! -s "$output_dir/$ARTIFACT_NAME.apk" ]]; then
+            echo 'Staged APK is empty.' >&2
+            exit 1
+          fi
+          if ! command -v apkanalyzer >/dev/null 2>&1; then
+            echo 'apkanalyzer is required to verify the release APK identity.' >&2
+            exit 1
+          fi
+          test "$(apkanalyzer manifest application-id "$output_dir/$ARTIFACT_NAME.apk")" = 'com.roomservice.tv'
+          test "$(apkanalyzer manifest debuggable "$output_dir/$ARTIFACT_NAME.apk")" = 'false'
+          test "$(apkanalyzer manifest version-code "$output_dir/$ARTIFACT_NAME.apk")" = "${{ steps.resolve.outputs.version_code }}"
+          jq -n \
+            --arg commitSha "${{ github.sha }}" \
+            --arg releaseId "${{ steps.resolve.outputs.update_release_id }}" \
+            --arg versionName "${{ steps.resolve.outputs.version_name }}" \
+            --arg versionCode "${{ steps.resolve.outputs.version_code }}" \
+            --arg packageName 'com.roomservice.tv' \
+            --arg certificateSha256 "$(jq -r '.certificateSha256' "$output_dir/$ARTIFACT_NAME.apk.manifest.json")" \
+            --arg sha256 "$actual_sha256" \
+            '{commitSha:$commitSha,releaseId:$releaseId,versionName:$versionName,versionCode:($versionCode|tonumber),packageName:$packageName,certificateSha256:$certificateSha256,sha256:$sha256}' \
+            > "$output_dir/release-record.json"
           echo "staged_directory=$output_dir" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed release artifact
@@ -360,6 +403,7 @@ jobs:
           test "$(jq -r '.latestVersionCode' "$update_manifest")" = "$VERSION_CODE"
           test "$(jq -r '.apkUrl' "$update_manifest")" = "$UPDATE_APK_URL"
           echo "APK_URL=$UPDATE_APK_URL" >> "$GITHUB_ENV"
+          aws configure set default.s3.addressing_style path
 
       - name: Upload versioned APK and manifests
         shell: bash
@@ -373,21 +417,50 @@ jobs:
           release_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk.manifest.json"
           update_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
 
-          aws s3 cp "$apk" "s3://$S3_BUCKET/$base_key/$ARTIFACT_NAME.apk" \
-            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
-            --content-type 'application/vnd.android.package-archive' \
-            --cache-control 'public,max-age=31536000,immutable'
-          aws s3 cp "$checksum" "s3://$S3_BUCKET/$base_key/$ARTIFACT_NAME.apk.sha256" \
-            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
-            --content-type 'text/plain' --cache-control 'public,max-age=31536000,immutable'
-          aws s3 cp "$release_manifest" "s3://$S3_BUCKET/$base_key/$ARTIFACT_NAME.apk.manifest.json" \
-            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
-            --content-type 'application/json' --cache-control 'public,max-age=31536000,immutable'
-          aws s3 cp "$update_manifest" "s3://$S3_BUCKET/$base_key/update-manifest.json" \
-            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
-            --content-type 'application/json' --cache-control 'public,max-age=31536000,immutable'
+          s3_args=(--endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress)
+          s3_api_args=(--endpoint-url "$S3_ENDPOINT" --region "$S3_REGION")
+
+          object_matches() {
+            local key="$1"
+            local file="$2"
+            local remote_hash
+            remote_hash="$(aws s3 cp "s3://$S3_BUCKET/$key" - "${s3_args[@]}" | sha256sum | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
+            local_hash="$(sha256sum "$file" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
+            [[ "$remote_hash" == "$local_hash" ]]
+          }
+
+          put_immutable() {
+            local key="$1"
+            local file="$2"
+            local content_type="$3"
+            local head_error="$RUNNER_TEMP/s3-head-error.txt"
+            if aws s3api head-object --bucket "$S3_BUCKET" --key "$key" "${s3_api_args[@]}" >/dev/null 2>"$head_error"; then
+              if object_matches "$key" "$file"; then
+                echo "Immutable object already exists with the same checksum: $key"
+                return 0
+              fi
+              echo "Immutable object exists with a different checksum: $key" >&2
+              exit 1
+            fi
+            if ! grep -Eqi '404|not[[:space:]]+found|nosuchkey|no[[:space:]]+such[[:space:]]+key' "$head_error"; then
+              cat "$head_error" >&2
+              exit 1
+            fi
+            aws s3 cp "$file" "s3://$S3_BUCKET/$key" "${s3_args[@]}" \
+              --content-type "$content_type" \
+              --cache-control 'public,max-age=31536000,immutable'
+            if ! object_matches "$key" "$file"; then
+              echo "Uploaded object checksum verification failed: $key" >&2
+              exit 1
+            fi
+          }
+
+          put_immutable "$base_key/$ARTIFACT_NAME.apk" "$apk" 'application/vnd.android.package-archive'
+          put_immutable "$base_key/$ARTIFACT_NAME.apk.sha256" "$checksum" 'text/plain'
+          put_immutable "$base_key/$ARTIFACT_NAME.apk.manifest.json" "$release_manifest" 'application/json'
+          put_immutable "$base_key/update-manifest.json" "$update_manifest" 'application/json'
           aws s3 cp "$update_manifest" "s3://$S3_BUCKET/$prefix/latest.json" \
-            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
+            "${s3_args[@]}" \
             --content-type 'application/json' --cache-control 'no-cache,no-store,must-revalidate'
 
       - name: Verify public immutable URL without following redirects
@@ -425,11 +498,17 @@ jobs:
     env:
       ARTIFACT_NAME: ${{ needs.build-release.outputs.artifact_name }}
       API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
+      STAFF_WEB_URL: ${{ vars.TV_STAFF_WEB_URL }}
+      GUEST_WEB_URL: ${{ vars.TV_GUEST_WEB_URL }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_API_SERVICE: ${{ vars.RAILWAY_API_SERVICE }}
       RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT || 'production' }}
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
     steps:
+      - name: Checkout release verification tools
+        uses: actions/checkout@v6
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -450,6 +529,7 @@ jobs:
           set -euo pipefail
           : "${RAILWAY_TOKEN:?RAILWAY_TOKEN is required in the tv-production-update environment}"
           : "${RAILWAY_API_SERVICE:?RAILWAY_API_SERVICE is required as an environment variable}"
+          : "${RAILWAY_PROJECT_ID:?RAILWAY_PROJECT_ID is required as an environment variable}"
           manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
           test -f "$manifest"
 
@@ -469,8 +549,10 @@ jobs:
           test "$sha256" != 'null'
 
           railway variable set \
+            --project "$RAILWAY_PROJECT_ID" \
             --service "$RAILWAY_API_SERVICE" \
             --environment "$RAILWAY_ENVIRONMENT" \
+            --skip-deploys \
             "TV_UPDATE_ENABLED=true" \
             "TV_UPDATE_VERSION_CODE=$version_code" \
             "TV_UPDATE_VERSION_NAME=$version_name" \
@@ -481,27 +563,43 @@ jobs:
             "TV_UPDATE_MANDATORY=$mandatory" \
             "TV_UPDATE_MIN_SUPPORTED_VERSION_CODE=$minimum_version_code"
 
-      - name: Verify Railway serves the promoted manifest
+          railway service redeploy \
+            --project "$RAILWAY_PROJECT_ID" \
+            --service "$RAILWAY_API_SERVICE" \
+            --environment "$RAILWAY_ENVIRONMENT" \
+            --yes
+
+      - name: Verify Railway and same-origin production surfaces
         shell: bash
         env:
           EXPECTED_VERSION_CODE: ${{ needs.build-release.outputs.version_code }}
+          EXPECTED_VERSION_NAME: ${{ needs.build-release.outputs.version_name }}
+          EXPECTED_RELEASE_ID: ${{ needs.build-release.outputs.release_id }}
           EXPECTED_APK_URL: ${{ needs.build-release.outputs.update_apk_url }}
         run: |
           set -euo pipefail
-          manifest_endpoint="${API_BASE_URL%/}/tv/update-manifest"
+          : "${STAFF_WEB_URL:?TV_STAFF_WEB_URL is required in the tv-production-update environment}"
+          : "${GUEST_WEB_URL:?TV_GUEST_WEB_URL is required in the tv-production-update environment}"
+          manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
+          expected_sha256="$(jq -r '.sha256' "$manifest")"
+          expected_certificate="$(jq -r '.certificateSha256' "$manifest")"
           for attempt in $(seq 1 18); do
-            response="$RUNNER_TEMP/egi-tv-feed-response.json"
-            if curl --fail --silent --show-error --max-time 15 "$manifest_endpoint" -o "$response"; then
-              actual_version_code="$(jq -r '.latestVersionCode // empty' "$response")"
-              actual_apk_url="$(jq -r '.apkUrl // empty' "$response")"
-              if [[ "$actual_version_code" == "$EXPECTED_VERSION_CODE" && "$actual_apk_url" == "$EXPECTED_APK_URL" ]]; then
-                echo 'Railway update feed matches the signed release.'
-                exit 0
-              fi
+            if node tools/verify-tv-release.mjs \
+              --environment production \
+              --api-url "$API_BASE_URL" \
+              --staff-url "$STAFF_WEB_URL" \
+              --guest-url "$GUEST_WEB_URL" \
+              --version-code "$EXPECTED_VERSION_CODE" \
+              --version-name "$EXPECTED_VERSION_NAME" \
+              --release-id "$EXPECTED_RELEASE_ID" \
+              --apk-url "$EXPECTED_APK_URL" \
+              --sha256 "$expected_sha256" \
+              --certificate "$expected_certificate"; then
+              exit 0
             fi
             sleep 10
           done
-          echo 'Railway did not serve the promoted update manifest within the verification window.' >&2
+          echo 'Production release verification did not pass within the deployment window.' >&2
           exit 1
 
       - name: Promotion summary
@@ -510,5 +608,8 @@ jobs:
             echo '## EGI TV update feed promoted'
             echo
             echo "- Railway environment: `$RAILWAY_ENVIRONMENT`"
-            echo '- API feed verified against the exact signed artifact'
+            echo "- Release ID: `${{ needs.build-release.outputs.release_id }}`"
+            echo "- Commit: `${{ needs.build-release.outputs.commit_sha }}`"
+            echo "- APK URL: `${{ needs.build-release.outputs.update_apk_url }}`"
+            echo '- API, Staff Web, Guest Web, Socket.IO proxy, and APK artifact verified'
           } >> "$GITHUB_STEP_SUMMARY"

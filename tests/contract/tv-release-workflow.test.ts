@@ -37,10 +37,22 @@ describe('EGI TV release workflow', () => {
         artifact_name: expect.any(String),
         version_code: expect.any(String),
         update_apk_url: expect.any(String),
+        release_id: expect.any(String),
         autopublish: expect.any(String),
+        commit_sha: expect.any(String),
       }),
     );
     expect(workflowSource).toContain('TV_SIGNING_KEYSTORE_BASE64');
     expect(workflowSource).not.toContain('pull_request_target');
+  });
+
+  it('is fail-closed for protected main-based releases and immutable promotion', () => {
+    expect(workflowSource).toContain('group: egi-tv-production-release');
+    expect(workflowSource).toContain('git merge-base --is-ancestor');
+    expect(workflowSource).toContain('github.ref_protected');
+    expect(workflowSource).toContain('put_immutable');
+    expect(workflowSource).toContain('--skip-deploys');
+    expect(workflowSource).toContain('railway service redeploy');
+    expect(workflowSource).toContain('tools/verify-tv-release.mjs');
   });
 });

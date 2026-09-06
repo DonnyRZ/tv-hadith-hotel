@@ -42,6 +42,10 @@ The workflow intentionally has no signing step on pull requests. This keeps
 the production key away from untrusted PR code and follows the principle that
 the release tag, not a random commit, creates a distributable APK.
 
+The release workflow is globally serialized. It accepts a production tag only
+when the tag commit is reachable from `main` and GitHub reports the ref as
+protected. A normal push to `main` never creates a production APK.
+
 ## One-time GitHub configuration
 
 Create a protected GitHub Environment named `tv-release` and add these secrets:
@@ -81,9 +85,9 @@ using a different bucket or API service.
 When the immutable update storage is ready, add:
 
 ```text
-TV_UPDATE_PUBLIC_BASE_URL=https://<public-update-host>
-TV_UPDATE_S3_ENDPOINT=https://<s3-compatible-endpoint>
-TV_UPDATE_S3_BUCKET=<bucket-name>
+TV_UPDATE_PUBLIC_BASE_URL=https://<minio-public-host>/egi-tv-updates
+TV_UPDATE_S3_ENDPOINT=https://<minio-public-host>
+TV_UPDATE_S3_BUCKET=egi-tv-updates
 TV_UPDATE_S3_PREFIX=egi-tv
 TV_UPDATE_S3_REGION=us-east-1
 ```
@@ -107,15 +111,38 @@ and these non-secret variables:
 ```text
 RAILWAY_API_SERVICE=<API service name or ID>
 RAILWAY_ENVIRONMENT=production
+RAILWAY_PROJECT_ID=cdd2af23-0c2e-4b3a-846a-862b49c80b50
+TV_STAFF_WEB_URL=https://<staff-web-production-host>
+TV_GUEST_WEB_URL=https://<guest-web-production-host>
 ```
 
 The last environment is an approval gate. Once approved, the workflow updates
-all `TV_UPDATE_*` variables as one operation and waits until the Railway API
-serves the exact version, URL, and checksum represented by the signed APK.
+all `TV_UPDATE_*` variables as one `railway variable set --skip-deploys`
+operation, explicitly redeploys the API, and verifies the exact version, URL,
+checksum, certificate, database, MinIO, Redis, realtime, Staff Web proxy,
+Guest Web proxy, and Socket.IO handshake. The workflow does not use a browser
+login; `RAILWAY_TOKEN` is a project-scoped secret available only to this
+protected environment.
 
 Until the storage and protected environments are configured, leave
 `TV_UPDATE_AUTOPUBLISH_ENABLED=false`. The tag workflow will still build and
 archive a signed APK, but it will not claim that the TV update feed is active.
+
+The required MinIO bucket is `egi-tv-updates`. Versioned objects are immutable:
+
+```text
+egi-tv/12/egi-tv-0.4.8-code-12.apk
+egi-tv/12/egi-tv-0.4.8-code-12.apk.sha256
+egi-tv/12/egi-tv-0.4.8-code-12.apk.manifest.json
+egi-tv/12/update-manifest.json
+egi-tv/latest.json
+```
+
+The first four objects are never overwritten. A retry is allowed only when the
+existing object has the same SHA-256. `latest.json` is the intentionally
+mutable pointer and is written only after all versioned objects pass checksum
+verification. The public endpoint must be HTTPS, direct, and support range
+downloads without a redirect.
 
 ## Bootstrap versus routine update
 
@@ -172,3 +199,11 @@ documentation](https://docs.railway.com/cli/variable).
 - The API feed is promoted only from the manifest produced by the signed build.
 - A failed build or failed verification blocks publication; it never falls back
   to an unsigned APK or a different key.
+
+## Release evidence
+
+Every successful workflow summary and artifact contains the commit SHA, version
+name/code, package, release ID, APK URL, SHA-256, certificate fingerprint,
+Railway deployment verification result, and manifest comparison result. It
+must never contain the keystore, signing password, Railway token, TV
+credential, pairing code, or session cookie.

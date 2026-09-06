@@ -26,6 +26,14 @@ The self-update decision and publish procedure are in
 The automated signed-release pipeline is defined in
 [`tv-release-automation.md`](../../Docs/tv-release-automation.md).
 
+For self-update operation, also follow
+[`tv-self-update-runbook.md`](../../Docs/tv-self-update-runbook.md). The normal
+release path is a protected `tv-v<semver>-code<number>` tag. GitHub Actions
+builds only the signed `release` variant, publishes an immutable MinIO object,
+promotes the exact manifest through a project-scoped Railway token, and
+verifies the API plus same-origin web proxies before the feed is active. A
+normal push to `main` does not create a production APK.
+
 ## Architecture
 
 - UI: Jetpack Compose for TV and `androidx.tv.material3`.

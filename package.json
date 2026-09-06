@@ -22,6 +22,7 @@
     "test:e2e": "node tools/run-e2e.mjs",
     "test:e2e:list": "playwright test --list",
     "verify:deployment": "node tools/verify-deployment.mjs",
+    "verify:tv-release": "node tools/verify-tv-release.mjs",
     "typecheck": "pnpm -r --if-present run typecheck",
     "typecheck:config": "tsc --noEmit -p tsconfig.tools.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",

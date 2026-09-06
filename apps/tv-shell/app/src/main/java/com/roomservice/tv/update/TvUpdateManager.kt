@@ -77,23 +77,48 @@ class TvUpdateManager(
     @Synchronized
     fun checkForUpdate(force: Boolean = false) {
         if (checkInFlight.getAndSet(true)) return
-        val lastCheckAt = preferences.getLong(KEY_LAST_CHECK_AT, 0L)
-        if (!force && nowMillis() - lastCheckAt < CHECK_INTERVAL_MS) {
+        val now = nowMillis()
+        val hasPreparedUpdate = !preferences.getString(KEY_PENDING_APK_PATH, null).isNullOrBlank()
+        if (!hasPreparedUpdate && shouldSkipTvUpdateCheck(
+                force = force,
+                nowMillis = now,
+                lastSuccessfulCheckAt = preferences.getLong(KEY_LAST_CHECK_AT, 0L),
+                lastAttemptAt = preferences.getLong(KEY_LAST_ATTEMPT_AT, 0L),
+            )
+        ) {
             checkInFlight.set(false)
             return
         }
-        preferences.edit().putLong(KEY_LAST_CHECK_AT, nowMillis()).apply()
+        preferences.edit().putLong(KEY_LAST_ATTEMPT_AT, now).apply()
         checkJob = scope.launch {
             try {
+                if (!force && restorePreparedUpdate()) {
+                    markSuccessfulCheck()
+                    return@launch
+                }
                 val manifest = api.getUpdateManifest()
                 when (val decision = evaluateTvUpdateManifest(
                     manifest = manifest,
                     installedPackageName = appContext.packageName,
                     installedVersionCode = BuildConfig.VERSION_CODE,
                 )) {
-                    TvUpdateDecision.NoUpdate -> mutableState.value = TvUpdateState.Idle
-                    is TvUpdateDecision.Invalid -> mutableState.value = TvUpdateState.Idle
-                    is TvUpdateDecision.Available -> downloadAndPrepare(decision.manifest)
+                    TvUpdateDecision.NoUpdate -> {
+                        clearPreparedUpdate()
+                        mutableState.value = TvUpdateState.Idle
+                        markSuccessfulCheck()
+                    }
+                    is TvUpdateDecision.Invalid -> {
+                        mutableState.value = TvUpdateState.Idle
+                        markSuccessfulCheck()
+                    }
+                    is TvUpdateDecision.Available -> {
+                        if (isDismissed(decision.manifest)) {
+                            mutableState.value = TvUpdateState.Idle
+                            markSuccessfulCheck()
+                        } else if (downloadAndPrepare(decision.manifest)) {
+                            markSuccessfulCheck()
+                        }
+                    }
                 }
             } catch (exception: CancellationException) {
                 throw exception
@@ -173,6 +198,7 @@ class TvUpdateManager(
     }
 
     fun retry() {
+        preferences.edit().remove(KEY_DISMISSED_RELEASE_ID).apply()
         mutableState.value = TvUpdateState.Idle
         checkForUpdate(force = true)
     }
@@ -182,6 +208,15 @@ class TvUpdateManager(
         if (current is TvUpdateState.Failed && current.mandatory) return
         if (current is TvUpdateState.Ready && current.manifest.mandatory) return
         if (current is TvUpdateState.PermissionRequired && current.manifest.mandatory) return
+        when (current) {
+            is TvUpdateState.Ready -> preferences.edit()
+                .putString(KEY_DISMISSED_RELEASE_ID, current.manifest.releaseId)
+                .apply()
+            is TvUpdateState.PermissionRequired -> preferences.edit()
+                .putString(KEY_DISMISSED_RELEASE_ID, current.manifest.releaseId)
+                .apply()
+            else -> Unit
+        }
         mutableState.value = TvUpdateState.Idle
     }
 
@@ -190,14 +225,16 @@ class TvUpdateManager(
         scope.coroutineContext[Job]?.cancel()
     }
 
-    private suspend fun downloadAndPrepare(manifest: TvUpdateManifest) {
+    private suspend fun downloadAndPrepare(manifest: TvUpdateManifest): Boolean {
         mutableState.value = TvUpdateState.Downloading(manifest, 0)
         try {
             val apk = withContext(Dispatchers.IO) { downloadOrReuse(manifest) }
+            persistPreparedUpdate(manifest, apk)
             mutableState.value = TvUpdateState.Ready(
                 manifest = manifest,
                 apkPath = apk.absolutePath,
             )
+            return true
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
@@ -205,7 +242,86 @@ class TvUpdateManager(
                 message = exception.message ?: "The update could not be prepared.",
                 mandatory = manifest.mandatory,
             )
+            return false
         }
+    }
+
+    private fun markSuccessfulCheck() {
+        preferences.edit()
+            .putLong(KEY_LAST_CHECK_AT, nowMillis())
+            .remove(KEY_LAST_ATTEMPT_AT)
+            .apply()
+    }
+
+    private fun isDismissed(manifest: TvUpdateManifest): Boolean =
+        !manifest.mandatory &&
+            manifest.releaseId != null &&
+            preferences.getString(KEY_DISMISSED_RELEASE_ID, null) == manifest.releaseId
+
+    private fun persistPreparedUpdate(manifest: TvUpdateManifest, apk: File) {
+        preferences.edit()
+            .putInt(KEY_PENDING_VERSION_CODE, manifest.latestVersionCode)
+            .putString(KEY_PENDING_VERSION_NAME, manifest.latestVersionName)
+            .putString(KEY_PENDING_APK_URL, manifest.apkUrl)
+            .putString(KEY_PENDING_SHA256, manifest.sha256)
+            .putString(KEY_PENDING_CERTIFICATE_SHA256, manifest.certificateSha256)
+            .putString(KEY_PENDING_RELEASE_ID, manifest.releaseId)
+            .putBoolean(KEY_PENDING_MANDATORY, manifest.mandatory)
+            .putInt(KEY_PENDING_MIN_SUPPORTED_VERSION_CODE, manifest.minSupportedVersionCode ?: -1)
+            .putString(KEY_PENDING_APK_PATH, apk.absolutePath)
+            .apply()
+    }
+
+    private suspend fun restorePreparedUpdate(): Boolean = withContext(Dispatchers.IO) {
+        val versionCode = preferences.getInt(KEY_PENDING_VERSION_CODE, 0)
+        if (versionCode <= BuildConfig.VERSION_CODE) {
+            clearPreparedUpdate()
+            return@withContext false
+        }
+        val apkPath = preferences.getString(KEY_PENDING_APK_PATH, null)
+        val manifest = TvUpdateManifest(
+            enabled = true,
+            packageName = appContext.packageName,
+            latestVersionCode = versionCode,
+            latestVersionName = preferences.getString(KEY_PENDING_VERSION_NAME, null),
+            apkUrl = preferences.getString(KEY_PENDING_APK_URL, null),
+            sha256 = preferences.getString(KEY_PENDING_SHA256, null),
+            certificateSha256 = preferences.getString(KEY_PENDING_CERTIFICATE_SHA256, null),
+            releaseId = preferences.getString(KEY_PENDING_RELEASE_ID, null),
+            mandatory = preferences.getBoolean(KEY_PENDING_MANDATORY, false),
+            minSupportedVersionCode = preferences.getInt(KEY_PENDING_MIN_SUPPORTED_VERSION_CODE, -1)
+                .takeIf { it >= 0 },
+        )
+        val apk = apkPath?.let(::File)
+        val apkIsValid = apk != null && verifyDownloadedApk(apk, manifest)
+        if (apk == null || !apkIsValid || isDismissed(manifest)) {
+            if (apk != null && apk.isFile && !apkIsValid) apk.delete()
+            clearPreparedUpdate()
+            return@withContext false
+        }
+        mutableState.value = TvUpdateState.Ready(manifest, apk.absolutePath)
+        true
+    }
+
+    private fun clearPreparedUpdate() {
+        val pendingPath = preferences.getString(KEY_PENDING_APK_PATH, null)
+        pendingPath?.let { path ->
+            val file = File(path)
+            if (file.isFile && file.parentFile == File(appContext.cacheDir, UPDATES_DIRECTORY)) {
+                file.delete()
+            }
+        }
+        preferences.edit()
+            .remove(KEY_PENDING_VERSION_CODE)
+            .remove(KEY_PENDING_VERSION_NAME)
+            .remove(KEY_PENDING_APK_URL)
+            .remove(KEY_PENDING_SHA256)
+            .remove(KEY_PENDING_CERTIFICATE_SHA256)
+            .remove(KEY_PENDING_RELEASE_ID)
+            .remove(KEY_PENDING_MANDATORY)
+            .remove(KEY_PENDING_MIN_SUPPORTED_VERSION_CODE)
+            .remove(KEY_PENDING_APK_PATH)
+            .apply()
     }
 
     private fun downloadOrReuse(manifest: TvUpdateManifest): File {
@@ -325,10 +441,20 @@ class TvUpdateManager(
 
     private companion object {
         const val APK_MIME_TYPE = "application/vnd.android.package-archive"
-        const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000L
         const val DOWNLOAD_BUFFER_BYTES = 32 * 1_024
         const val MAX_APK_BYTES = 250L * 1_024L * 1_024L
         const val KEY_LAST_CHECK_AT = "last_check_at"
+        const val KEY_LAST_ATTEMPT_AT = "last_attempt_at"
+        const val KEY_DISMISSED_RELEASE_ID = "dismissed_release_id"
+        const val KEY_PENDING_VERSION_CODE = "pending_version_code"
+        const val KEY_PENDING_VERSION_NAME = "pending_version_name"
+        const val KEY_PENDING_APK_URL = "pending_apk_url"
+        const val KEY_PENDING_SHA256 = "pending_sha256"
+        const val KEY_PENDING_CERTIFICATE_SHA256 = "pending_certificate_sha256"
+        const val KEY_PENDING_RELEASE_ID = "pending_release_id"
+        const val KEY_PENDING_MANDATORY = "pending_mandatory"
+        const val KEY_PENDING_MIN_SUPPORTED_VERSION_CODE = "pending_min_supported_version_code"
+        const val KEY_PENDING_APK_PATH = "pending_apk_path"
         const val PREFERENCES_NAME = "tv_updates"
         const val UPDATES_DIRECTORY = "updates"
     }

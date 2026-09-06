@@ -18,7 +18,16 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
 ## Release owner procedure
 
 1. Read `tv-apk-best-practices.md` and `tv-release-checklist.md`.
-2. Build with the protected key custody wrapper. Use a new version code:
+2. Use the protected GitHub Actions release workflow for a normal release.
+   Create an annotated protected tag from `main` with a new version code:
+
+   ```text
+   tv-v0.4.8-code12
+   ```
+
+   The workflow uses its project-scoped `RAILWAY_TOKEN` only during the
+   protected feed-promotion job; it does not depend on a browser login. The
+   manual custody build below is recovery/bootstrap-only:
 
    ```powershell
    .\tools\tv\package-tv-from-custody.ps1 `
@@ -34,12 +43,15 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
    the API `TV_UPDATE_*` variables. The URL may be supplied later, but it must
    be the immutable location of this exact APK and must not use an expiring
    signed query string; TVs need the same stable URL for later checks.
-3. Verify the generated release manifest, package, version, certificate, and
-   SHA-256. Never rename a debug APK or generate a replacement key.
-4. Upload `app-release.apk` to a versioned, immutable HTTPS path, for example
-   `https://updates.example.com/egi-tv/11/app-release.apk`. Do not overwrite
-   that object after publishing its checksum.
-5. Configure the API deployment with the exact artifact metadata:
+3. The workflow produces the signed APK, checksum, release record, and update
+   manifest as a GitHub artifact. The `tv-update-publish` approval uploads the
+   immutable objects to MinIO and verifies the public URL without redirects.
+4. The `tv-production-update` approval updates the API variables with
+   `railway variable set --skip-deploys`, redeploys the API explicitly, and
+   verifies direct API, Staff Web, Guest Web, Redis/realtime health, Socket.IO,
+   and exact manifest-to-artifact equality. It is not complete until that
+   verification passes.
+5. The API update manifest is the exact artifact metadata:
 
    ```text
    TV_UPDATE_ENABLED=true
@@ -53,7 +65,7 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
    TV_UPDATE_MIN_SUPPORTED_VERSION_CODE=1
    ```
 
-6. Deploy the API and verify:
+6. Verify the production surfaces:
 
    ```text
    GET https://<api-host>/api/v1/health
@@ -63,9 +75,8 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
    The first response must report production and healthy dependencies. The
    second must report the exact version, URL, SHA-256, and certificate. Never
    paste a password, cookie, pairing code, or TV credential into a ticket.
-   Run the deployment preflight with `--require-tv-update` during the rollout;
-   it also checks the APK URL from the Staff Web origin and rejects a missing
-   or unreachable artifact.
+   The release verification checks the APK URL from the Staff Web origin and
+   rejects a missing, redirected, or unreachable artifact.
 7. Test the feed on one pilot TV. Keep `TV_UPDATE_ENABLED=false` until the
    object is reachable and the pilot is ready.
 8. After pilot approval, leave the same immutable artifact enabled for the
@@ -87,6 +98,11 @@ fails, the APK is discarded and the installed app remains in place.
 - If no prompt appears, check that the API manifest is enabled, the TV has
   network access, and the advertised version is higher than the installed
   version.
+- A failed network check does not consume the six-hour normal cooldown. The
+  updater retries after a short failure backoff, and **Retry** always bypasses
+  the cooldown.
+- If the APK finished downloading before an app restart, the updater restores
+  the verified cached file instead of downloading it again.
 - If Android asks for permission, complete the one-time permission step above.
 - If the feed reports a mismatch or the download fails, stop the rollout and
   fix the manifest/storage. Do not disable signing verification.

@@ -4,6 +4,11 @@ This document is mandatory for IT/support. Diagnose using the response status,
 stable error code, request ID, and environment identity. Pairing codes and TV
 credentials are secrets and must not be logged or copied into tickets.
 
+Release owners must also follow [TV release automation](tv-release-automation.md)
+and [the release checklist](tv-release-checklist.md). Routine release promotion
+uses the protected GitHub workflow and project-scoped Railway token; it must not
+depend on a browser login from an operator workstation.
+
 ## Decision table
 
 | HTTP | Code | Meaning | Safe action |

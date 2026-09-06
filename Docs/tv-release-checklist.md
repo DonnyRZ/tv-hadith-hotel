@@ -46,7 +46,11 @@ packages impossible.
   development hostname.
 - [ ] Staff Web and TV use the same canonical production API.
 - [ ] If self-update is enabled, the immutable APK URL, SHA-256, and certificate
-  in `/tv/update-manifest` match the release artifact exactly.
+      in `/tv/update-manifest` match the release artifact exactly.
+- [ ] Release tag is protected, comes from `main`, and uses the format
+      `tv-v<semver>-code<number>`.
+- [ ] The workflow artifact contains the APK, checksum, release record, and
+      update manifest for the same commit SHA and release ID.
 
 Build from the repository root using the protected custody wrapper:
 
@@ -82,6 +86,10 @@ in [`tv-release-automation.md`](tv-release-automation.md).
 - [ ] `pnpm verify:deployment` passes.
 - [ ] When the self-update feed is enabled, `pnpm verify:deployment` passes
       with `--require-tv-update` and confirms the immutable APK is reachable.
+- [ ] The release workflow's production verification passes through both
+      Staff Web and Guest Web, including the Socket.IO proxy handshake.
+- [ ] `tv-production-update` contains the project-scoped `RAILWAY_TOKEN`, API
+      service ID, project ID, `TV_STAFF_WEB_URL`, and `TV_GUEST_WEB_URL`.
 - [ ] Unauthenticated Staff Web API requests return JSON `401`; no request
   returns `405` or static HTML.
 
