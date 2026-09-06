@@ -32,6 +32,14 @@ import okhttp3.Request
 sealed interface TvUpdateState {
     data object Idle : TvUpdateState
 
+    data class Checking(
+        val trigger: TvUpdateCheckTrigger,
+    ) : TvUpdateState
+
+    data class UpToDate(
+        val versionName: String,
+    ) : TvUpdateState
+
     data class Downloading(
         val manifest: TvUpdateManifest,
         val progressPercent: Int,
@@ -55,6 +63,14 @@ sealed interface TvUpdateState {
     ) : TvUpdateState
 }
 
+internal sealed interface TvUpdateCheckResult {
+    data object Skipped : TvUpdateCheckResult
+    data object AlreadyRunning : TvUpdateCheckResult
+    data object NoUpdate : TvUpdateCheckResult
+    data object Prepared : TvUpdateCheckResult
+    data class Failed(val retryable: Boolean) : TvUpdateCheckResult
+}
+
 class TvUpdateManager(
     context: Context,
     private val api: TvApi,
@@ -74,11 +90,24 @@ class TvUpdateManager(
 
     val state: StateFlow<TvUpdateState> = mutableState.asStateFlow()
 
-    @Synchronized
-    fun checkForUpdate(force: Boolean = false) {
-        if (checkInFlight.getAndSet(true)) return
+    fun checkForUpdate(trigger: TvUpdateCheckTrigger = TvUpdateCheckTrigger.BACKGROUND) {
+        checkJob = scope.launch {
+            val result = checkForUpdateAndAwait(trigger, publishState = true)
+            if (result is TvUpdateCheckResult.Failed && result.retryable) {
+                TvUpdateWorkScheduler.scheduleRetry(appContext)
+            }
+        }
+    }
+
+    internal suspend fun checkForUpdateAndAwait(
+        trigger: TvUpdateCheckTrigger,
+        publishState: Boolean,
+    ): TvUpdateCheckResult {
+        if (checkInFlight.getAndSet(true)) return TvUpdateCheckResult.AlreadyRunning
+
         val now = nowMillis()
         val hasPreparedUpdate = !preferences.getString(KEY_PENDING_APK_PATH, null).isNullOrBlank()
+        val force = trigger.isForced()
         if (!hasPreparedUpdate && shouldSkipTvUpdateCheck(
                 force = force,
                 nowMillis = now,
@@ -87,15 +116,17 @@ class TvUpdateManager(
             )
         ) {
             checkInFlight.set(false)
-            return
+            return TvUpdateCheckResult.Skipped
         }
+
         preferences.edit().putLong(KEY_LAST_ATTEMPT_AT, now).apply()
-        checkJob = scope.launch {
-            try {
-                if (!force && restorePreparedUpdate()) {
-                    markSuccessfulCheck()
-                    return@launch
-                }
+        if (publishState) mutableState.value = TvUpdateState.Checking(trigger)
+
+        return try {
+            if (restorePreparedUpdate(publishState)) {
+                markSuccessfulCheck()
+                TvUpdateCheckResult.Prepared
+            } else {
                 val manifest = api.getUpdateManifest()
                 when (val decision = evaluateTvUpdateManifest(
                     manifest = manifest,
@@ -104,30 +135,59 @@ class TvUpdateManager(
                 )) {
                     TvUpdateDecision.NoUpdate -> {
                         clearPreparedUpdate()
-                        mutableState.value = TvUpdateState.Idle
+                        if (publishState) {
+                            mutableState.value = if (trigger == TvUpdateCheckTrigger.MANUAL) {
+                                TvUpdateState.UpToDate(BuildConfig.VERSION_NAME)
+                            } else {
+                                TvUpdateState.Idle
+                            }
+                        }
                         markSuccessfulCheck()
+                        TvUpdateCheckResult.NoUpdate
                     }
                     is TvUpdateDecision.Invalid -> {
-                        mutableState.value = TvUpdateState.Idle
+                        if (publishState && trigger == TvUpdateCheckTrigger.MANUAL) {
+                            mutableState.value = TvUpdateState.Failed(decision.reason)
+                        } else if (publishState) {
+                            mutableState.value = TvUpdateState.Idle
+                        }
                         markSuccessfulCheck()
+                        TvUpdateCheckResult.Failed(retryable = false)
                     }
                     is TvUpdateDecision.Available -> {
                         if (isDismissed(decision.manifest)) {
-                            mutableState.value = TvUpdateState.Idle
+                            if (publishState) {
+                                mutableState.value = if (trigger == TvUpdateCheckTrigger.MANUAL) {
+                                    TvUpdateState.UpToDate(BuildConfig.VERSION_NAME)
+                                } else {
+                                    TvUpdateState.Idle
+                                }
+                            }
                             markSuccessfulCheck()
-                        } else if (downloadAndPrepare(decision.manifest)) {
+                            TvUpdateCheckResult.NoUpdate
+                        } else if (downloadAndPrepare(decision.manifest, publishState)) {
                             markSuccessfulCheck()
+                            TvUpdateCheckResult.Prepared
+                        } else {
+                            TvUpdateCheckResult.Failed(retryable = true)
                         }
                     }
                 }
-            } catch (exception: CancellationException) {
-                throw exception
-            } catch (_: Exception) {
-                // Update discovery must never block pairing or guest service use.
-                mutableState.value = TvUpdateState.Idle
-            } finally {
-                checkInFlight.set(false)
             }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: Exception) {
+            // Update discovery must never block pairing or guest service use.
+            if (publishState && trigger == TvUpdateCheckTrigger.MANUAL) {
+                mutableState.value = TvUpdateState.Failed(
+                    message = exception.message ?: "The update check could not be completed.",
+                )
+            } else if (publishState) {
+                mutableState.value = TvUpdateState.Idle
+            }
+            TvUpdateCheckResult.Failed(retryable = true)
+        } finally {
+            checkInFlight.set(false)
         }
     }
 
@@ -200,7 +260,7 @@ class TvUpdateManager(
     fun retry() {
         preferences.edit().remove(KEY_DISMISSED_RELEASE_ID).apply()
         mutableState.value = TvUpdateState.Idle
-        checkForUpdate(force = true)
+        checkForUpdate(TvUpdateCheckTrigger.RETRY)
     }
 
     fun dismiss() {
@@ -225,23 +285,32 @@ class TvUpdateManager(
         scope.coroutineContext[Job]?.cancel()
     }
 
-    private suspend fun downloadAndPrepare(manifest: TvUpdateManifest): Boolean {
-        mutableState.value = TvUpdateState.Downloading(manifest, 0)
+    private suspend fun downloadAndPrepare(
+        manifest: TvUpdateManifest,
+        publishState: Boolean,
+    ): Boolean {
+        if (publishState) mutableState.value = TvUpdateState.Downloading(manifest, 0)
         try {
-            val apk = withContext(Dispatchers.IO) { downloadOrReuse(manifest) }
+            val apk = withContext(Dispatchers.IO) {
+                downloadOrReuse(manifest, publishState)
+            }
             persistPreparedUpdate(manifest, apk)
-            mutableState.value = TvUpdateState.Ready(
-                manifest = manifest,
-                apkPath = apk.absolutePath,
-            )
+            if (publishState) {
+                mutableState.value = TvUpdateState.Ready(
+                    manifest = manifest,
+                    apkPath = apk.absolutePath,
+                )
+            }
             return true
         } catch (exception: CancellationException) {
             throw exception
         } catch (exception: Exception) {
-            mutableState.value = TvUpdateState.Failed(
-                message = exception.message ?: "The update could not be prepared.",
-                mandatory = manifest.mandatory,
-            )
+            if (publishState) {
+                mutableState.value = TvUpdateState.Failed(
+                    message = exception.message ?: "The update could not be prepared.",
+                    mandatory = manifest.mandatory,
+                )
+            }
             return false
         }
     }
@@ -272,7 +341,7 @@ class TvUpdateManager(
             .apply()
     }
 
-    private suspend fun restorePreparedUpdate(): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun restorePreparedUpdate(publishState: Boolean): Boolean = withContext(Dispatchers.IO) {
         val versionCode = preferences.getInt(KEY_PENDING_VERSION_CODE, 0)
         if (versionCode <= BuildConfig.VERSION_CODE) {
             clearPreparedUpdate()
@@ -299,7 +368,7 @@ class TvUpdateManager(
             clearPreparedUpdate()
             return@withContext false
         }
-        mutableState.value = TvUpdateState.Ready(manifest, apk.absolutePath)
+        if (publishState) mutableState.value = TvUpdateState.Ready(manifest, apk.absolutePath)
         true
     }
 
@@ -324,7 +393,7 @@ class TvUpdateManager(
             .apply()
     }
 
-    private fun downloadOrReuse(manifest: TvUpdateManifest): File {
+    private fun downloadOrReuse(manifest: TvUpdateManifest, publishState: Boolean): File {
         val directory = File(appContext.cacheDir, UPDATES_DIRECTORY).apply {
             check(mkdirs() || isDirectory) { "The update cache could not be created." }
         }
@@ -359,7 +428,9 @@ class TvUpdateManager(
                         } else {
                             0
                         }
-                        mutableState.value = TvUpdateState.Downloading(manifest, progress)
+                        if (publishState) {
+                            mutableState.value = TvUpdateState.Downloading(manifest, progress)
+                        }
                     }
                 }
             }

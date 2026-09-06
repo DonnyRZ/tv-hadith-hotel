@@ -18,8 +18,8 @@ tv-v<version-name>-code<version-code>
 Example:
 
 ```powershell
-git tag -a tv-v0.4.8-code12 -m "EGI TV 0.4.8"
-git push origin tv-v0.4.8-code12
+git tag -a tv-v0.4.9-code14 -m "EGI TV 0.4.9"
+git push origin tv-v0.4.9-code14
 ```
 
 The `EGI TV Release` workflow then:
@@ -168,6 +168,11 @@ protected tag
   -> Android installer confirmation
   -> app updates in place
 ```
+
+The updater-capable bootstrap for the current pilot is signed release
+`0.4.9` / version code `14`. TVs running `0.4.7` or `0.4.8` must receive this
+one release through the approved USB procedure. Once code `14` is installed,
+later releases use the in-app flow above; a new flash drive is not required.
 
 The same package and signing key preserve the installed application identity,
 pairing credential, and room assignment. A release must never use a new package

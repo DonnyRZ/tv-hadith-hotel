@@ -3,6 +3,15 @@ package com.roomservice.tv.update
 internal const val TV_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000L
 internal const val TV_UPDATE_FAILURE_RETRY_INTERVAL_MS = 5 * 60 * 1_000L
 
+enum class TvUpdateCheckTrigger {
+    FOREGROUND,
+    MANUAL,
+    BACKGROUND,
+    RETRY,
+}
+
+internal fun TvUpdateCheckTrigger.isForced(): Boolean = this != TvUpdateCheckTrigger.BACKGROUND
+
 internal fun shouldSkipTvUpdateCheck(
     force: Boolean,
     nowMillis: Long,

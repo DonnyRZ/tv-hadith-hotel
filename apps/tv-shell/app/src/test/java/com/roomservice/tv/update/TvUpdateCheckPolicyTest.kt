@@ -56,4 +56,36 @@ class TvUpdateCheckPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `foreground and manual triggers are forced checks`() {
+        assertFalse(
+            shouldSkipTvUpdateCheck(
+                force = TvUpdateCheckTrigger.FOREGROUND.isForced(),
+                nowMillis = 2L,
+                lastSuccessfulCheckAt = 1L,
+                lastAttemptAt = 1L,
+            ),
+        )
+        assertFalse(
+            shouldSkipTvUpdateCheck(
+                force = TvUpdateCheckTrigger.MANUAL.isForced(),
+                nowMillis = 2L,
+                lastSuccessfulCheckAt = 1L,
+                lastAttemptAt = 1L,
+            ),
+        )
+    }
+
+    @Test
+    fun `background trigger retains the six hour cooldown`() {
+        assertTrue(
+            shouldSkipTvUpdateCheck(
+                force = TvUpdateCheckTrigger.BACKGROUND.isForced(),
+                nowMillis = TV_UPDATE_CHECK_INTERVAL_MS - 1L,
+                lastSuccessfulCheckAt = 1L,
+                lastAttemptAt = 1L,
+            ),
+        )
+    }
 }

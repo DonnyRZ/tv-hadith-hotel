@@ -17,6 +17,29 @@ workflow publishes it through a token-protected API bridge into the private
 MinIO bucket, and the API serves the exact immutable object over HTTPS. Do not
 expose the MinIO API or console publicly.
 
+## How the TV checks for updates
+
+The production TV app has a visible **Updates** action in the top header, after
+**Selection**, on every guest screen that uses the main shell. It is deliberately
+not placed in the bottom area reserved for app shortcuts.
+
+- Opening the app or returning to it from background performs an immediate
+  manifest check; it does not wait for the six-hour cooldown.
+- Selecting **Updates** performs an immediate manual check and always bypasses
+  the cooldown.
+- If no release is available, the TV shows the current version in a small
+  confirmation panel.
+- If a release is available, the app downloads and verifies it before showing
+  **Install update**.
+- A network-constrained background worker checks at most every six hours and
+  may prepare a verified APK silently. It never launches Android's installer by
+  itself.
+- A failed check retries with a short backoff. It is not treated as a successful
+  six-hour check.
+
+The six-hour interval is therefore a background efficiency limit, not a delay
+for an operator who opens the app or presses **Updates**.
+
 ## Release owner procedure
 
 1. Read `tv-apk-best-practices.md` and `tv-release-checklist.md`.
@@ -24,7 +47,7 @@ expose the MinIO API or console publicly.
    Create an annotated protected tag from `main` with a new version code:
 
    ```text
-   tv-v0.4.8-code12
+   tv-v0.4.9-code14
    ```
 
    The workflow uses its project-scoped `RAILWAY_TOKEN` only during the
@@ -58,12 +81,12 @@ expose the MinIO API or console publicly.
 
    ```text
    TV_UPDATE_ENABLED=true
-   TV_UPDATE_VERSION_CODE=11
-   TV_UPDATE_VERSION_NAME=0.4.7
-   TV_UPDATE_APK_URL=https://api-production-505c.up.railway.app/api/v1/tv/updates/egi-tv/11/app-release.apk
+   TV_UPDATE_VERSION_CODE=14
+   TV_UPDATE_VERSION_NAME=0.4.9
+   TV_UPDATE_APK_URL=https://api-production-505c.up.railway.app/api/v1/tv/updates/egi-tv/14/egi-tv-0.4.9-code-14.apk
    TV_UPDATE_SHA256=<sha256-from-the-release-manifest>
    TV_UPDATE_CERTIFICATE_SHA256=50dff6906e42e0ea5ee933225fadf4a55cb9a2050baaeafa3bff8b6d90820904
-   TV_UPDATE_RELEASE_ID=tv-0.4.7
+   TV_UPDATE_RELEASE_ID=tv-0.4.9
    TV_UPDATE_MANDATORY=false
    TV_UPDATE_MIN_SUPPORTED_VERSION_CODE=1
    ```
@@ -86,6 +109,14 @@ expose the MinIO API or console publicly.
    fleet and record which TVs completed the update.
 
 ## TV operator procedure
+
+For a routine manual check, open any screen with the main header and select
+**Updates**. Keep the remote on the button until one of these results appears:
+
+- **You're up to date**: no installation is needed.
+- **A new version is ready**: continue with **Install update**.
+- **Update could not be prepared**: select **Try again** after confirming the
+  TV has network access.
 
 On the first update, Android may show a permission screen for “Install unknown
 apps”. Choose **Open settings**, allow EGI TV, and return to EGI TV. This is a
@@ -124,6 +155,9 @@ fails, the APK is discarded and the installed app remains in place.
 - [ ] API manifest checksum equals the immutable APK checksum.
 - [ ] API manifest certificate equals the known production fingerprint.
 - [ ] API health is production and healthy.
+- [ ] The TV can run a manual **Updates** check from the header.
+- [ ] Reopening the TV app triggers a fresh update check immediately.
+- [ ] Background update work remains limited to the six-hour interval.
 - [ ] Pilot TV retained room pairing and guest flow after update.
 - [ ] No debug package was used for the pilot.
 - [ ] Fleet update results are recorded.

@@ -98,4 +98,7 @@
     <string name="tv_update_open_settings">Open settings</string>
     <string name="tv_update_retry">Try again</string>
     <string name="tv_update_later">Later</string>
+    <string name="tv_updates">Updates</string>
+    <string name="tv_update_up_to_date">You’re up to date</string>
+    <string name="tv_update_current_version">Current version: %1$s</string>
 </resources>

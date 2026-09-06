@@ -13,21 +13,26 @@ import com.roomservice.tv.presentation.TvRoot
 import com.roomservice.tv.presentation.RoomServiceTvTheme
 import com.roomservice.tv.presentation.TvViewModel
 import com.roomservice.tv.presentation.TvUpdateOverlay
+import com.roomservice.tv.update.TvUpdateCheckTrigger
 
 class MainActivity : ComponentActivity() {
     private val tvUpdateManager by lazy { (application as TvApplication).container.updateManager }
     private val tvViewModel: TvViewModel by viewModels {
         TvViewModelFactory((application as TvApplication).container)
     }
+    private var foregroundCheckIssued = false
 
     override fun onStart() {
         super.onStart()
-        tvUpdateManager.checkForUpdate()
+        if (!foregroundCheckIssued) {
+            foregroundCheckIssued = true
+            tvUpdateManager.checkForUpdate(TvUpdateCheckTrigger.FOREGROUND)
+        }
     }
 
-    override fun onResume() {
-        super.onResume()
-        tvUpdateManager.checkForUpdate()
+    override fun onStop() {
+        foregroundCheckIssued = false
+        super.onStop()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +54,10 @@ class MainActivity : ComponentActivity() {
                         onRemoveFromCart = tvViewModel::removeFromCart,
                         onRefreshRequests = tvViewModel::refreshRequests,
                         onSubmitCart = tvViewModel::submitCart,
+                        updateState = updateState,
+                        onCheckForUpdates = {
+                            tvUpdateManager.checkForUpdate(TvUpdateCheckTrigger.MANUAL)
+                        },
                     )
                     TvUpdateOverlay(
                         state = updateState,
@@ -64,7 +73,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (isFinishing) tvUpdateManager.close()
         super.onDestroy()
     }
 }

@@ -26,6 +26,13 @@ The self-update decision and publish procedure are in
 The automated signed-release pipeline is defined in
 [`tv-release-automation.md`](../../Docs/tv-release-automation.md).
 
+The updater is available from the visible **Updates** action in the header,
+after **Selection**, on every main-shell screen. Opening or reopening the app
+checks immediately; selecting **Updates** performs a manual check that bypasses
+the normal six-hour background interval. A network-constrained background
+worker checks quietly every six hours and only stages verified APKs; Android
+still requires its own installer confirmation on an unmanaged TV.
+
 For self-update operation, also follow
 [`tv-self-update-runbook.md`](../../Docs/tv-self-update-runbook.md). The normal
 release path is a protected `tv-v<semver>-code<number>` tag. GitHub Actions
@@ -91,7 +98,7 @@ future updates and, when requested by the distribution registration flow, to
 associate with the package. No key or payment secret belongs in the repository.
 
 For the normal release path, do not run this command manually. Create a
-protected tag such as `tv-v0.4.8-code12` and let the `EGI TV Release` GitHub
+protected tag such as `tv-v0.4.9-code14` and let the `EGI TV Release` GitHub
 Actions workflow build and verify the signed artifact. The manual command is a
 recovery path only; see [`tv-release-automation.md`](../../Docs/tv-release-automation.md).
 

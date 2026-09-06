@@ -98,4 +98,7 @@
     <string name="tv_update_open_settings">Открыть настройки</string>
     <string name="tv_update_retry">Повторить</string>
     <string name="tv_update_later">Позже</string>
+    <string name="tv_updates">Обновления</string>
+    <string name="tv_update_up_to_date">Установлена последняя версия</string>
+    <string name="tv_update_current_version">Текущая версия: %1$s</string>
 </resources>

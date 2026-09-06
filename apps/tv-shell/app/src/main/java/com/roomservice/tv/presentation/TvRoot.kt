@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -94,6 +95,7 @@ import com.roomservice.tv.data.RoomStatus
 import com.roomservice.tv.data.TvContext
 import com.roomservice.tv.data.TvLanguage
 import com.roomservice.tv.data.UnitCode
+import com.roomservice.tv.update.TvUpdateState
 import java.text.NumberFormat
 import java.util.Locale
 import kotlinx.coroutines.delay
@@ -263,6 +265,8 @@ fun TvRoot(
     onRemoveFromCart: (String) -> Unit,
     onSubmitCart: () -> Unit,
     onRefreshRequests: () -> Unit = {},
+    updateState: TvUpdateState = TvUpdateState.Idle,
+    onCheckForUpdates: () -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
         onInitialize()
@@ -316,6 +320,8 @@ fun TvRoot(
                         onRefreshRequests = onRefreshRequests,
                         onSubmitCart = onSubmitCart,
                         state = uiState,
+                        updateState = updateState,
+                        onCheckForUpdates = onCheckForUpdates,
                     )
                 }
             }
@@ -423,6 +429,8 @@ private fun ReadyApp(
     onRefreshRequests: () -> Unit,
     onSubmitCart: () -> Unit,
     state: TvUiState.Ready,
+    updateState: TvUpdateState,
+    onCheckForUpdates: () -> Unit,
 ) {
     val navController = rememberNavController()
     var selectedUnit by remember { mutableStateOf<UnitCode?>(null) }
@@ -445,25 +453,28 @@ private fun ReadyApp(
         val shellVerticalPadding = if (compactShell) 18.dp else 28.dp
         val headerContentGap = if (compactShell) 14.dp else 22.dp
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 64.dp, vertical = shellVerticalPadding),
         ) {
-            TvHeader(
-                cartCount = cartCount,
-                language = language,
-                onCart = { navigatePrimary("cart") },
-                onHome = { navigatePrimary("home") },
-                onLanguageChange = onLanguageChange,
-                onRequests = { navigatePrimary("requests") },
-            )
-            Spacer(modifier = Modifier.height(headerContentGap))
-            NavHost(
-                navController = navController,
-                startDestination = "home",
-                modifier = Modifier.weight(1f),
-            ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                TvHeader(
+                    cartCount = cartCount,
+                    language = language,
+                    onCart = { navigatePrimary("cart") },
+                    onHome = { navigatePrimary("home") },
+                    onLanguageChange = onLanguageChange,
+                    onRequests = { navigatePrimary("requests") },
+                    updateState = updateState,
+                    onCheckForUpdates = onCheckForUpdates,
+                )
+                Spacer(modifier = Modifier.height(headerContentGap))
+                NavHost(
+                    navController = navController,
+                    startDestination = "home",
+                    modifier = Modifier.weight(1f),
+                ) {
                 composable("home") {
                     HomeScreen(
                         state = state,
@@ -571,27 +582,35 @@ private fun ReadyApp(
                         state = state,
                     )
                 }
+                }
+                state.statusMessage?.let { message ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = when (message) {
+                            TvStatusMessage.REQUEST_SUBMITTED -> stringResource(R.string.tv_request_submitted)
+                        },
+                        color = TvFocused,
+                        fontFamily = HotelUiFont,
+                        fontSize = 18.sp,
+                    )
+                }
+                state.errorMessage?.let { message ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = localizedTvErrorMessage(state.errorCode ?: "TV_API_ERROR", message),
+                        color = TvDanger,
+                        fontFamily = HotelUiFont,
+                        fontSize = 18.sp,
+                    )
+                }
             }
-            state.statusMessage?.let { message ->
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = when (message) {
-                        TvStatusMessage.REQUEST_SUBMITTED -> stringResource(R.string.tv_request_submitted)
-                    },
-                    color = TvFocused,
-                    fontFamily = HotelUiFont,
-                    fontSize = 18.sp,
-                )
-            }
-            state.errorMessage?.let { message ->
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = localizedTvErrorMessage(state.errorCode ?: "TV_API_ERROR", message),
-                    color = TvDanger,
-                    fontFamily = HotelUiFont,
-                    fontSize = 18.sp,
-                )
-            }
+            TvUpdateFeedback(
+                state = updateState,
+                language = language,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = if (compactShell) 64.dp else 72.dp),
+            )
         }
     }
 }
@@ -616,43 +635,73 @@ private fun TvHeader(
     onHome: () -> Unit,
     onLanguageChange: (TvLanguage) -> Unit,
     onRequests: () -> Unit,
+    updateState: TvUpdateState,
+    onCheckForUpdates: () -> Unit,
 ) {
     val homeFocusRequester = remember { FocusRequester() }
+    val updateBusy = updateState is TvUpdateState.Checking || updateState is TvUpdateState.Downloading
 
     LaunchedEffect(Unit) {
         requestTvFocus(homeFocusRequester)
     }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val compactHeader = maxWidth < 1_300.dp
+        val actionGap = if (compactHeader) 8.dp else 12.dp
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HotelMark()
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = stringResource(R.string.tv_brand),
-                color = TvIvory,
-                fontFamily = HotelDisplayFont,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 2.sp,
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HotelMark()
+                Spacer(modifier = Modifier.width(if (compactHeader) 12.dp else 16.dp))
+                Text(
+                    text = stringResource(R.string.tv_brand),
+                    color = TvIvory,
+                    fontFamily = HotelDisplayFont,
+                    fontSize = if (compactHeader) 26.sp else 30.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 2.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TvLanguageSwitcher(
+                language = language,
+                onChange = onLanguageChange,
+                compact = compactHeader,
+            )
+            Spacer(modifier = Modifier.width(actionGap))
+            TvActionButton(
+                label = stringResource(R.string.tv_home),
+                modifier = Modifier.focusRequester(homeFocusRequester),
+                onClick = onHome,
+                compact = compactHeader,
+            )
+            Spacer(modifier = Modifier.width(actionGap))
+            TvActionButton(
+                label = stringResource(R.string.tv_my_requests),
+                onClick = onRequests,
+                compact = compactHeader,
+            )
+            Spacer(modifier = Modifier.width(actionGap))
+            TvActionButton(
+                label = stringResource(R.string.tv_cart, cartCount),
+                onClick = onCart,
+                compact = compactHeader,
+            )
+            Spacer(modifier = Modifier.width(actionGap))
+            TvActionButton(
+                label = stringResource(R.string.tv_updates),
+                onClick = onCheckForUpdates,
+                enabled = !updateBusy,
+                compact = compactHeader,
+                busy = updateBusy,
             )
         }
-        TvLanguageSwitcher(language = language, onChange = onLanguageChange)
-        Spacer(modifier = Modifier.width(14.dp))
-        TvActionButton(
-            label = stringResource(R.string.tv_home),
-            modifier = Modifier.focusRequester(homeFocusRequester),
-            onClick = onHome,
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        TvActionButton(label = stringResource(R.string.tv_my_requests), onClick = onRequests)
-        Spacer(modifier = Modifier.width(12.dp))
-        TvActionButton(label = stringResource(R.string.tv_cart, cartCount), onClick = onCart)
     }
 }
 
@@ -660,6 +709,7 @@ private fun TvHeader(
 private fun TvLanguageSwitcher(
     language: TvLanguage,
     onChange: (TvLanguage) -> Unit,
+    compact: Boolean = false,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         TvLanguage.entries.forEach { option ->
@@ -667,6 +717,7 @@ private fun TvLanguageSwitcher(
                 label = option.tag.uppercase(Locale.ROOT),
                 selected = option == language,
                 onClick = { onChange(option) },
+                compact = compact,
             )
         }
     }
@@ -2391,6 +2442,8 @@ private fun TvActionButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     selected: Boolean = false,
+    compact: Boolean = false,
+    busy: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -2435,18 +2488,37 @@ private fun TvActionButton(
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .heightIn(min = 48.dp)
+            .padding(
+                horizontal = if (compact) 14.dp else 18.dp,
+                vertical = if (compact) 10.dp else 12.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = if (focused && enabled) TvBackground else if (enabled) TvIvory else TvMuted,
-            fontFamily = HotelUiFont,
-            fontSize = 16.sp,
-            fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text(
+                text = label,
+                color = if (focused && enabled) TvBackground else if (enabled) TvIvory else TvMuted,
+                fontFamily = HotelUiFont,
+                fontSize = if (compact) 15.sp else 16.sp,
+                fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (busy) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .background(
+                            if (focused) TvBackground else TvFocused,
+                            CircleShape,
+                        ),
+                )
+            }
+        }
     }
 }
 

@@ -98,4 +98,7 @@
     <string name="tv_update_open_settings">Sozlamalarni ochish</string>
     <string name="tv_update_retry">Qayta urinish</string>
     <string name="tv_update_later">Keyinroq</string>
+    <string name="tv_updates">Yangilanishlar</string>
+    <string name="tv_update_up_to_date">Ilova yangilangan</string>
+    <string name="tv_update_current_version">Joriy versiya: %1$s</string>
 </resources>

@@ -99,13 +99,18 @@ class TvRootTest {
 
         val homeButton = composeRule.onNodeWithText("Home")
         val requestsButton = composeRule.onNodeWithText("My requests")
-        val cartButton = composeRule.onNodeWithText("Cart (0)")
+        val cartButton = composeRule.onNodeWithText("Selection (0)")
+        val updatesButton = composeRule.onNodeWithText("Updates")
 
         composeRule.waitForIdle()
         homeButton.assertIsFocused()
         sendDpad(homeButton, AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
         requestsButton.assertIsFocused()
         sendDpad(requestsButton, AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
+        cartButton.assertIsFocused()
+        sendDpad(cartButton, AndroidKeyEvent.KEYCODE_DPAD_RIGHT)
+        updatesButton.assertIsFocused()
+        sendDpad(updatesButton, AndroidKeyEvent.KEYCODE_DPAD_LEFT)
         cartButton.assertIsFocused()
         sendDpad(cartButton, AndroidKeyEvent.KEYCODE_DPAD_LEFT)
         requestsButton.assertIsFocused()
@@ -125,6 +130,47 @@ class TvRootTest {
             .sendKeyDownUpSync(AndroidKeyEvent.KEYCODE_BACK)
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Service").assertIsDisplayed()
+    }
+
+    @Test
+    fun updateButtonIsVisibleAndInvokesManualCheck() {
+        val checked = AtomicBoolean(false)
+        composeRule.setContent {
+            TvRoot(
+                language = TvLanguage.EN,
+                uiState = sampleReadyState(),
+                onInitialize = {},
+                onRetry = {},
+                onAddToCart = {},
+                onRemoveFromCart = {},
+                onSubmitCart = {},
+                onCheckForUpdates = { checked.set(true) },
+            )
+        }
+
+        val updatesButton = composeRule.onNodeWithText("Updates")
+        updatesButton.assertIsDisplayed()
+        updatesButton.performClick()
+        assertTrue(checked.get())
+    }
+
+    @Test
+    fun manualCheckCanShowUpToDateFeedbackWithoutBlockingHome() {
+        composeRule.setContent {
+            TvRoot(
+                language = TvLanguage.EN,
+                uiState = sampleReadyState(),
+                onInitialize = {},
+                onRetry = {},
+                onAddToCart = {},
+                onRemoveFromCart = {},
+                onSubmitCart = {},
+                updateState = com.roomservice.tv.update.TvUpdateState.UpToDate("0.4.9"),
+            )
+        }
+
+        composeRule.onNodeWithText("You’re up to date").assertIsDisplayed()
+        composeRule.onNodeWithText("Welcome, Ahmad Fauzan").assertIsDisplayed()
     }
 
     @Test

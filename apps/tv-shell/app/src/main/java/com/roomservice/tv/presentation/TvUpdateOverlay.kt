@@ -47,6 +47,7 @@ import com.roomservice.tv.R
 import com.roomservice.tv.data.TvLanguage
 import com.roomservice.tv.update.TvUpdateState
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private val UpdateBackdrop = Color(0xB8071426)
 private val UpdateSurface = Color(0xF20D213A)
@@ -73,6 +74,8 @@ fun TvUpdateOverlay(
         is TvUpdateState.PermissionRequired,
         is TvUpdateState.Failed -> state
         TvUpdateState.Idle,
+        is TvUpdateState.Checking,
+        is TvUpdateState.UpToDate,
         is TvUpdateState.Downloading,
         TvUpdateState.Installing -> return
     }
@@ -186,11 +189,67 @@ fun TvUpdateOverlay(
 }
 
 @Composable
+fun TvUpdateFeedback(
+    state: TvUpdateState,
+    language: TvLanguage,
+    modifier: Modifier = Modifier,
+) {
+    val upToDate = state as? TvUpdateState.UpToDate ?: return
+    var visible by remember(upToDate.versionName) { mutableStateOf(true) }
+
+    LaunchedEffect(upToDate.versionName) {
+        delay(4_500)
+        visible = false
+    }
+
+    if (!visible) return
+
+    Box(
+        modifier = modifier
+            .width(360.dp)
+            .background(UpdateSurface, RoundedCornerShape(12.dp))
+            .border(1.dp, UpdateLine, RoundedCornerShape(12.dp))
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "✓",
+                color = UpdateGold,
+                fontFamily = HotelUiFont,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Column {
+                Text(
+                    text = updateString(R.string.tv_update_up_to_date, language),
+                    color = UpdateIvory,
+                    fontFamily = HotelUiFont,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = updateString(R.string.tv_update_current_version, language, upToDate.versionName),
+                    color = UpdateMuted,
+                    fontFamily = HotelUiFont,
+                    fontSize = 14.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun updateTitle(state: TvUpdateState, language: TvLanguage): String = when (state) {
     is TvUpdateState.Ready,
     is TvUpdateState.PermissionRequired -> updateString(R.string.tv_update_title, language)
     is TvUpdateState.Failed -> updateString(R.string.tv_update_failed, language)
     TvUpdateState.Idle,
+    is TvUpdateState.Checking,
+    is TvUpdateState.UpToDate,
     is TvUpdateState.Downloading,
     TvUpdateState.Installing -> ""
 }
@@ -207,6 +266,8 @@ private fun updateMessage(state: TvUpdateState, language: TvLanguage): String {
         is TvUpdateState.PermissionRequired -> updateString(R.string.tv_update_permission_message, language)
         is TvUpdateState.Failed -> updateString(R.string.tv_update_failed_message, language)
         TvUpdateState.Idle,
+        is TvUpdateState.Checking,
+        is TvUpdateState.UpToDate,
         is TvUpdateState.Downloading,
         TvUpdateState.Installing -> ""
     }
