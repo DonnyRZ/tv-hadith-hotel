@@ -464,9 +464,13 @@ jobs:
 
           put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk" "$apk" 'application/vnd.android.package-archive'
           put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk.sha256" "$checksum" 'text/plain'
-          put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk.manifest.json" "$release_manifest" 'application/json'
-          put_immutable "$prefix/$VERSION_CODE/update-manifest.json" "$update_manifest" 'application/json'
-          put_immutable "$prefix/latest/latest.json" "$update_manifest" 'application/json'
+          # Send JSON manifests as octet-stream so Nest's JSON parser does not
+          # consume the raw request body before the CI-only upload endpoint.
+          # The API infers and stores the canonical application/json type from
+          # the immutable file name.
+          put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk.manifest.json" "$release_manifest" 'application/octet-stream'
+          put_immutable "$prefix/$VERSION_CODE/update-manifest.json" "$update_manifest" 'application/octet-stream'
+          put_immutable "$prefix/latest/latest.json" "$update_manifest" 'application/octet-stream'
 
       - name: Verify public immutable URL without following redirects
         shell: bash
