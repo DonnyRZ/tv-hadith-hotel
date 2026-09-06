@@ -106,6 +106,20 @@ export function validateRuntimeConfig(config: Record<string, unknown>) {
     if (!isHttpsUrl(readString(config, 'TV_UPDATE_APK_URL'))) {
       errors.push('TV_UPDATE_APK_URL must be an absolute HTTPS URL when TV_UPDATE_ENABLED is true');
     }
+    if (readString(config, 'TV_UPDATE_STORAGE_BUCKET').length === 0) {
+      errors.push('TV_UPDATE_STORAGE_BUCKET is required when TV_UPDATE_ENABLED is true');
+    }
+    if (readString(config, 'TV_UPDATE_UPLOAD_TOKEN').length < 32) {
+      errors.push(
+        'TV_UPDATE_UPLOAD_TOKEN must contain at least 32 characters when TV_UPDATE_ENABLED is true',
+      );
+    }
+    const configuredUpdatePrefix = readString(config, 'TV_UPDATE_STORAGE_PREFIX');
+    if (!/^[A-Za-z0-9._-]{1,80}$/u.test(configuredUpdatePrefix)) {
+      errors.push(
+        'TV_UPDATE_STORAGE_PREFIX must be a safe single path segment when TV_UPDATE_ENABLED is true',
+      );
+    }
     if (!isSha256(readString(config, 'TV_UPDATE_SHA256'))) {
       errors.push(
         'TV_UPDATE_SHA256 must be a 64-character SHA-256 value when TV_UPDATE_ENABLED is true',

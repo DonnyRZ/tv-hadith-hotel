@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'node:crypto';
 
 import { ApiException } from '../auth/api-exception';
 import { runtimeReleaseId, TV_UPDATE_PACKAGE_NAME } from '../config/runtime-config';
@@ -7,6 +8,7 @@ import { toGuestStay } from '../guest/guest-stay';
 import { RECEPTIONIST_REPOSITORY } from '../receptionist/receptionist.repository';
 import type { ReceptionistRepository } from '../receptionist/receptionist.repository';
 import { TV_DEVICE_REPOSITORY } from './tv-device.repository';
+import { TvUpdateStorage } from './tv-update-storage';
 import {
   TvDevicePairingAlreadyUsedError,
   TvDevicePairingCodeChangedError,
@@ -33,9 +35,14 @@ interface RateLimitRecord {
   resetAt: number;
 }
 
+const MAX_TV_UPDATE_BYTES = 250 * 1024 * 1024;
+const TV_UPDATE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/u;
+const TV_UPDATE_PREFIX_PATTERN = /^[A-Za-z0-9._-]{1,80}$/u;
+
 @Injectable()
 export class TvService {
   private readonly rateLimits = new Map<string, RateLimitRecord>();
+  private updateStorage?: TvUpdateStorage;
 
   public constructor(
     @Inject(TV_DEVICE_REPOSITORY) private readonly repository: TvDeviceRepository,
@@ -175,9 +182,9 @@ export class TvService {
   /**
    * Public, non-secret release metadata for the TV self-update client.
    *
-   * The API container deliberately never serves the APK itself. The URL points
-   * to immutable HTTPS storage/CDN and the TV verifies both the file digest and
-   * signing certificate before opening Android's package installer.
+   * The API exposes immutable HTTPS download metadata. APK bytes are served
+   * through the API from private MinIO, and the TV verifies both the file
+   * digest and signing certificate before opening Android's package installer.
    */
   public getUpdateManifest(): TvUpdateManifest {
     const enabled = this.readBoolean('TV_UPDATE_ENABLED', false);
@@ -216,6 +223,40 @@ export class TvService {
           ? null
           : Number(configuredMinimum),
     };
+  }
+
+  /**
+   * GitHub Actions publishes to private MinIO through this narrow, token
+   * protected endpoint. The endpoint never accepts arbitrary bucket keys.
+   */
+  public async uploadUpdateArtifact(input: {
+    objectPrefix: string;
+    versionCode: string;
+    fileName: string;
+    contentType: string;
+    body: Buffer;
+    uploadToken: string | undefined;
+  }): Promise<{ objectKey: string; byteSize: number }> {
+    this.assertUpdateUploadToken(input.uploadToken);
+    const objectKey = this.updateObjectKey(input.objectPrefix, input.versionCode, input.fileName);
+    if (input.body.length === 0 || input.body.length > MAX_TV_UPDATE_BYTES) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, {
+        code: 'TV_UPDATE_ARTIFACT_SIZE_INVALID',
+        message: 'The TV update artifact size is invalid.',
+      });
+    }
+    await this.getUpdateStorage().put(objectKey, input.body, input.contentType);
+    return { objectKey, byteSize: input.body.length };
+  }
+
+  public async readUpdateArtifact(input: {
+    objectPrefix: string;
+    versionCode: string;
+    fileName: string;
+    range: string | undefined;
+  }) {
+    const objectKey = this.updateObjectKey(input.objectPrefix, input.versionCode, input.fileName);
+    return this.getUpdateStorage().get(objectKey, input.range);
   }
 
   public async revokeDevice(deviceId: string) {
@@ -279,6 +320,47 @@ export class TvService {
       code: 'PAIRING_CODE_EXPIRED',
       message: 'The TV pairing code has expired. Start a new pairing session.',
     });
+  }
+
+  private getUpdateStorage(): TvUpdateStorage {
+    this.updateStorage ??= new TvUpdateStorage(this.config);
+    return this.updateStorage;
+  }
+
+  private assertUpdateUploadToken(token: string | undefined): void {
+    const expected = this.config.get<string>('TV_UPDATE_UPLOAD_TOKEN')?.trim() ?? '';
+    if (
+      expected.length < 32 ||
+      token === undefined ||
+      token.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(token), Buffer.from(expected))
+    ) {
+      throw new ApiException(HttpStatus.UNAUTHORIZED, {
+        code: 'TV_UPDATE_UPLOAD_UNAUTHORIZED',
+        message: 'The TV update upload authorization is invalid.',
+      });
+    }
+  }
+
+  private updateObjectKey(objectPrefix: string, versionCode: string, fileName: string): string {
+    const configuredPrefix =
+      this.config
+        .get<string>('TV_UPDATE_STORAGE_PREFIX')
+        ?.trim()
+        .replace(/^\/+|\/+$/gu, '') || 'egi-tv';
+    if (
+      !TV_UPDATE_PREFIX_PATTERN.test(objectPrefix) ||
+      objectPrefix !== configuredPrefix ||
+      !/^(latest|[1-9][0-9]{0,8})$/u.test(versionCode) ||
+      !TV_UPDATE_FILE_PATTERN.test(fileName) ||
+      fileName.includes('..')
+    ) {
+      throw new ApiException(HttpStatus.BAD_REQUEST, {
+        code: 'TV_UPDATE_ARTIFACT_PATH_INVALID',
+        message: 'The TV update artifact path is invalid.',
+      });
+    }
+    return `${objectPrefix}/${versionCode}/${fileName}`;
   }
 
   private pairingNotFound(): ApiException {

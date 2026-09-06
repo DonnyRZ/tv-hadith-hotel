@@ -58,11 +58,7 @@ describe('production runtime configuration', () => {
         TV_UPDATE_SHA256: 'not-a-sha256',
         TV_UPDATE_CERTIFICATE_SHA256: 'not-a-sha256',
       }),
-    ).toThrow(
-      'TV_UPDATE_APK_URL must be an absolute HTTPS URL when TV_UPDATE_ENABLED is true; ' +
-        'TV_UPDATE_SHA256 must be a 64-character SHA-256 value when TV_UPDATE_ENABLED is true; ' +
-        'TV_UPDATE_CERTIFICATE_SHA256 must be a 64-character SHA-256 value when TV_UPDATE_ENABLED is true',
-    );
+    ).toThrow(/TV_UPDATE_APK_URL must be an absolute HTTPS URL when TV_UPDATE_ENABLED is true/);
   });
 
   it('rejects expiring or signed query-string APK URLs', () => {

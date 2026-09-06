@@ -33,10 +33,10 @@ The `EGI TV Release` workflow then:
    version code, APK SHA-256, and the retained production certificate.
 6. Uploads the APK, checksum, and release manifests as a named workflow
    artifact.
-7. If update publishing is enabled, uploads the versioned APK to the
-   S3-compatible update storage, verifies the public URL without following a
-   redirect, and promotes the exact manifest to the Railway API after the
-   protected environment approval.
+7. If update publishing is enabled, uploads the versioned APK and manifests
+   through the token-protected API bridge into the private MinIO update bucket,
+   verifies the public API URL without following a redirect, and promotes the
+   exact manifest to the Railway API after the protected environment approval.
 
 The workflow intentionally has no signing step on pull requests. This keeps
 the production key away from untrusted PR code and follows the principle that
@@ -75,6 +75,7 @@ Add these non-secret Environment variables:
 TV_PRODUCTION_API_BASE_URL=https://api-production-505c.up.railway.app/api/v1/
 TV_INITIAL_PRODUCTION_VERSION_CODE=11
 TV_UPDATE_AUTOPUBLISH_ENABLED=false
+TV_UPDATE_PUBLIC_BASE_URL=https://api-production-505c.up.railway.app/api/v1/tv/updates
 ```
 
 Keep the shared values above available to the `tv-release` environment. The
@@ -82,22 +83,29 @@ storage values below belong to `tv-update-publish`, and the Railway values
 belong to `tv-production-update`; this prevents a publish job from silently
 using a different bucket or API service.
 
-When the immutable update storage is ready, add:
+The API owns the private MinIO bucket and exposes only the exact immutable
+artifact route. Do not create a public MinIO or MinIO console domain. Add the
+same public base URL to `tv-update-publish` so the publish job can verify
+objects:
 
 ```text
-TV_UPDATE_PUBLIC_BASE_URL=https://<minio-public-host>/egi-tv-updates
-TV_UPDATE_S3_ENDPOINT=https://<minio-public-host>
-TV_UPDATE_S3_BUCKET=egi-tv-updates
-TV_UPDATE_S3_PREFIX=egi-tv
-TV_UPDATE_S3_REGION=us-east-1
+TV_UPDATE_PUBLIC_BASE_URL=https://api-production-505c.up.railway.app/api/v1/tv/updates
 ```
 
 For the automatic publish path, create a protected Environment named
 `tv-update-publish` with these secrets:
 
 ```text
-TV_UPDATE_S3_ACCESS_KEY_ID
-TV_UPDATE_S3_SECRET_ACCESS_KEY
+TV_UPDATE_UPLOAD_TOKEN
+```
+
+The API production service must have these storage variables and the same
+token as a protected GitHub secret:
+
+```text
+TV_UPDATE_STORAGE_BUCKET=egi-tv-updates
+TV_UPDATE_STORAGE_PREFIX=egi-tv
+TV_UPDATE_UPLOAD_TOKEN=<random-token-at-least-32-characters>
 ```
 
 Create a second protected Environment named `tv-production-update` with:
@@ -119,30 +127,31 @@ TV_GUEST_WEB_URL=https://<guest-web-production-host>
 The last environment is an approval gate. Once approved, the workflow updates
 all `TV_UPDATE_*` variables as one `railway variable set --skip-deploys`
 operation, explicitly redeploys the API, and verifies the exact version, URL,
-checksum, certificate, database, MinIO, Redis, realtime, Staff Web proxy,
-Guest Web proxy, and Socket.IO handshake. The workflow does not use a browser
-login; `RAILWAY_TOKEN` is a project-scoped secret available only to this
-protected environment.
+checksum, certificate, database, private MinIO, Redis, realtime, Staff Web
+proxy, Guest Web proxy, and Socket.IO handshake. The workflow does not use a
+browser login; `RAILWAY_TOKEN` is a project-scoped secret available only to
+this protected environment.
 
 Until the storage and protected environments are configured, leave
 `TV_UPDATE_AUTOPUBLISH_ENABLED=false`. The tag workflow will still build and
 archive a signed APK, but it will not claim that the TV update feed is active.
 
-The required MinIO bucket is `egi-tv-updates`. Versioned objects are immutable:
+The required private MinIO bucket is `egi-tv-updates`. Versioned objects are
+immutable and are served through the API route
+`/api/v1/tv/updates/<prefix>/<version>/<file>`:
 
 ```text
 egi-tv/12/egi-tv-0.4.8-code-12.apk
 egi-tv/12/egi-tv-0.4.8-code-12.apk.sha256
 egi-tv/12/egi-tv-0.4.8-code-12.apk.manifest.json
 egi-tv/12/update-manifest.json
-egi-tv/latest.json
+egi-tv/latest/latest.json
 ```
 
 The first four objects are never overwritten. A retry is allowed only when the
-existing object has the same SHA-256. `latest.json` is the intentionally
-mutable pointer and is written only after all versioned objects pass checksum
-verification. The public endpoint must be HTTPS, direct, and support range
-downloads without a redirect.
+existing object has the same SHA-256. The API bridge validates the prefix,
+version, file name, and upload token; the TV download route supports range
+requests and does not redirect. MinIO itself stays private.
 
 ## Bootstrap versus routine update
 

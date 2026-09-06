@@ -29,7 +29,8 @@ The automated signed-release pipeline is defined in
 For self-update operation, also follow
 [`tv-self-update-runbook.md`](../../Docs/tv-self-update-runbook.md). The normal
 release path is a protected `tv-v<semver>-code<number>` tag. GitHub Actions
-builds only the signed `release` variant, publishes an immutable MinIO object,
+builds only the signed `release` variant, publishes an immutable object into
+private MinIO through the API bridge,
 promotes the exact manifest through a project-scoped Railway token, and
 verifies the API plus same-origin web proxies before the feed is active. A
 normal push to `main` does not create a production APK.

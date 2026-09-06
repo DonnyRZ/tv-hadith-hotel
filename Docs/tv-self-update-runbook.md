@@ -12,8 +12,10 @@ download is verified, the app presents Android's official installer. The
 existing app data, pairing credential, and room mapping are preserved because
 the package name and production signing certificate remain unchanged.
 
-The API does not host the APK on its Railway container. Publish the APK first
-to immutable HTTPS object storage/CDN, then point the API at that exact file.
+The API does not keep the APK in its Railway container filesystem. The release
+workflow publishes it through a token-protected API bridge into the private
+MinIO bucket, and the API serves the exact immutable object over HTTPS. Do not
+expose the MinIO API or console publicly.
 
 ## Release owner procedure
 
@@ -34,7 +36,7 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
      -VersionCode <higher-than-the-fleet> `
      -PreviousVersionCode <current-fleet-version> `
      -VersionName <release-version> `
-     -UpdateApkUrl https://updates.example.com/egi-tv/<version-code>/app-release.apk `
+     -UpdateApkUrl https://api-production-505c.up.railway.app/api/v1/tv/updates/egi-tv/<version-code>/app-release.apk `
      -UpdateReleaseId tv-<release-version>
    ```
 
@@ -45,7 +47,8 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
    signed query string; TVs need the same stable URL for later checks.
 3. The workflow produces the signed APK, checksum, release record, and update
    manifest as a GitHub artifact. The `tv-update-publish` approval uploads the
-   immutable objects to MinIO and verifies the public URL without redirects.
+   immutable objects through the API bridge into private MinIO and verifies the
+   public API URL without redirects.
 4. The `tv-production-update` approval updates the API variables with
    `railway variable set --skip-deploys`, redeploys the API explicitly, and
    verifies direct API, Staff Web, Guest Web, Redis/realtime health, Socket.IO,
@@ -57,7 +60,7 @@ to immutable HTTPS object storage/CDN, then point the API at that exact file.
    TV_UPDATE_ENABLED=true
    TV_UPDATE_VERSION_CODE=11
    TV_UPDATE_VERSION_NAME=0.4.7
-   TV_UPDATE_APK_URL=https://updates.example.com/egi-tv/11/app-release.apk
+   TV_UPDATE_APK_URL=https://api-production-505c.up.railway.app/api/v1/tv/updates/egi-tv/11/app-release.apk
    TV_UPDATE_SHA256=<sha256-from-the-release-manifest>
    TV_UPDATE_CERTIFICATE_SHA256=50dff6906e42e0ea5ee933225fadf4a55cb9a2050baaeafa3bff8b6d90820904
    TV_UPDATE_RELEASE_ID=tv-0.4.7

@@ -358,7 +358,7 @@ jobs:
           retention-days: 90
 
   publish-update:
-    name: Publish immutable APK to update storage
+    name: Publish immutable APK through the private storage bridge
     needs: build-release
     if: ${{ needs.build-release.outputs.autopublish == 'true' }}
     runs-on: ubuntu-latest
@@ -369,15 +369,10 @@ jobs:
       ARTIFACT_NAME: ${{ needs.build-release.outputs.artifact_name }}
       VERSION_CODE: ${{ needs.build-release.outputs.version_code }}
       UPDATE_APK_URL: ${{ needs.build-release.outputs.update_apk_url }}
-      S3_ENDPOINT: ${{ vars.TV_UPDATE_S3_ENDPOINT }}
-      S3_BUCKET: ${{ vars.TV_UPDATE_S3_BUCKET }}
-      S3_REGION: ${{ vars.TV_UPDATE_S3_REGION || 'us-east-1' }}
-      S3_PREFIX: ${{ needs.build-release.outputs.object_prefix }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.TV_UPDATE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.TV_UPDATE_S3_SECRET_ACCESS_KEY }}
-      AWS_EC2_METADATA_DISABLED: 'true'
-      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
+      UPDATE_PUBLIC_BASE_URL: ${{ vars.TV_UPDATE_PUBLIC_BASE_URL || '' }}
+      UPDATE_PREFIX: ${{ needs.build-release.outputs.object_prefix }}
+      UPDATE_UPLOAD_TOKEN: ${{ secrets.TV_UPDATE_UPLOAD_TOKEN }}
 
     steps:
       - name: Download signed release artifact
@@ -390,10 +385,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : "${S3_ENDPOINT:?TV_UPDATE_S3_ENDPOINT is required}"
-          : "${S3_BUCKET:?TV_UPDATE_S3_BUCKET is required}"
-          : "${AWS_ACCESS_KEY_ID:?TV_UPDATE_S3_ACCESS_KEY_ID is required}"
-          : "${AWS_SECRET_ACCESS_KEY:?TV_UPDATE_S3_SECRET_ACCESS_KEY is required}"
+          : "${API_BASE_URL:?TV_PRODUCTION_API_BASE_URL is required}"
+          : "${UPDATE_PUBLIC_BASE_URL:?TV_UPDATE_PUBLIC_BASE_URL is required}"
+          : "${UPDATE_UPLOAD_TOKEN:?TV_UPDATE_UPLOAD_TOKEN is required}"
           apk="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk"
           update_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
           test -f "$apk"
@@ -402,29 +396,32 @@ jobs:
           test "$(jq -r '.packageName' "$update_manifest")" = 'com.roomservice.tv'
           test "$(jq -r '.latestVersionCode' "$update_manifest")" = "$VERSION_CODE"
           test "$(jq -r '.apkUrl' "$update_manifest")" = "$UPDATE_APK_URL"
+          test "$UPDATE_APK_URL" = "${UPDATE_PUBLIC_BASE_URL%/}/$UPDATE_PREFIX/$VERSION_CODE/$ARTIFACT_NAME.apk"
           echo "APK_URL=$UPDATE_APK_URL" >> "$GITHUB_ENV"
-          aws configure set default.s3.addressing_style path
 
-      - name: Upload versioned APK and manifests
+      - name: Upload immutable versioned APK and manifests
         shell: bash
         run: |
           set -euo pipefail
-          prefix="${S3_PREFIX#/}"
+          prefix="${UPDATE_PREFIX#/}"
           prefix="${prefix%/}"
-          base_key="$prefix/$VERSION_CODE"
           apk="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk"
           checksum="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk.sha256"
           release_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk.manifest.json"
           update_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
 
-          s3_args=(--endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress)
-          s3_api_args=(--endpoint-url "$S3_ENDPOINT" --region "$S3_REGION")
-
           object_matches() {
             local key="$1"
             local file="$2"
-            local remote_hash
-            remote_hash="$(aws s3 cp "s3://$S3_BUCKET/$key" - "${s3_args[@]}" | sha256sum | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
+            local remote_file="$RUNNER_TEMP/egi-tv-remote-object"
+            local status
+            status="$(curl --silent --show-error --location --max-time 180 \
+              --output "$remote_file" --write-out '%{http_code}' \
+              "${UPDATE_PUBLIC_BASE_URL%/}/$key")"
+            if [[ "$status" != '200' ]]; then
+              return 1
+            fi
+            remote_hash="$(sha256sum "$remote_file" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
             local_hash="$(sha256sum "$file" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
             [[ "$remote_hash" == "$local_hash" ]]
           }
@@ -433,8 +430,13 @@ jobs:
             local key="$1"
             local file="$2"
             local content_type="$3"
-            local head_error="$RUNNER_TEMP/s3-head-error.txt"
-            if aws s3api head-object --bucket "$S3_BUCKET" --key "$key" "${s3_api_args[@]}" >/dev/null 2>"$head_error"; then
+            local object_url="${UPDATE_PUBLIC_BASE_URL%/}/$key"
+            local upload_url="${API_BASE_URL%/}/tv/update-artifact/$key"
+            local remote_file="$RUNNER_TEMP/egi-tv-existing-object"
+            local status
+            status="$(curl --silent --show-error --location --max-time 180 \
+              --output "$remote_file" --write-out '%{http_code}' "$object_url")"
+            if [[ "$status" == '200' ]]; then
               if object_matches "$key" "$file"; then
                 echo "Immutable object already exists with the same checksum: $key"
                 return 0
@@ -442,26 +444,26 @@ jobs:
               echo "Immutable object exists with a different checksum: $key" >&2
               exit 1
             fi
-            if ! grep -Eqi '404|not[[:space:]]+found|nosuchkey|no[[:space:]]+such[[:space:]]+key' "$head_error"; then
-              cat "$head_error" >&2
+            if [[ "$status" != '404' ]]; then
+              echo "Unable to inspect immutable object $key (HTTP $status)." >&2
               exit 1
             fi
-            aws s3 cp "$file" "s3://$S3_BUCKET/$key" "${s3_args[@]}" \
-              --content-type "$content_type" \
-              --cache-control 'public,max-age=31536000,immutable'
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --max-time 300 \
+              --request POST --upload-file "$file" \
+              --header "Authorization: Bearer $UPDATE_UPLOAD_TOKEN" \
+              --header "Content-Type: $content_type" \
+              "$upload_url"
             if ! object_matches "$key" "$file"; then
               echo "Uploaded object checksum verification failed: $key" >&2
               exit 1
             fi
           }
 
-          put_immutable "$base_key/$ARTIFACT_NAME.apk" "$apk" 'application/vnd.android.package-archive'
-          put_immutable "$base_key/$ARTIFACT_NAME.apk.sha256" "$checksum" 'text/plain'
-          put_immutable "$base_key/$ARTIFACT_NAME.apk.manifest.json" "$release_manifest" 'application/json'
-          put_immutable "$base_key/update-manifest.json" "$update_manifest" 'application/json'
-          aws s3 cp "$update_manifest" "s3://$S3_BUCKET/$prefix/latest.json" \
-            "${s3_args[@]}" \
-            --content-type 'application/json' --cache-control 'no-cache,no-store,must-revalidate'
+          put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk" "$apk" 'application/vnd.android.package-archive'
+          put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk.sha256" "$checksum" 'text/plain'
+          put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk.manifest.json" "$release_manifest" 'application/json'
+          put_immutable "$prefix/$VERSION_CODE/update-manifest.json" "$update_manifest" 'application/json'
+          put_immutable "$prefix/latest/latest.json" "$update_manifest" 'application/json'
 
       - name: Verify public immutable URL without following redirects
         shell: bash
