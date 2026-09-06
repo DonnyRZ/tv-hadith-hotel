@@ -23,8 +23,14 @@ on:
         required: false
         default: false
         type: boolean
+      reuse_artifact_run_id:
+        description: 'Recovery only: reuse the signed artifact from an earlier workflow run instead of rebuilding'
+        required: false
+        default: ''
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -83,6 +89,7 @@ jobs:
       INPUT_VERSION_CODE: ${{ inputs.version_code }}
       INPUT_PREVIOUS_VERSION_CODE: ${{ inputs.previous_version_code }}
       INPUT_BOOTSTRAP_ONLY: ${{ inputs.bootstrap_only }}
+      INPUT_REUSE_ARTIFACT_RUN_ID: ${{ inputs.reuse_artifact_run_id }}
       TV_INITIAL_PRODUCTION_VERSION_CODE: ${{ vars.TV_INITIAL_PRODUCTION_VERSION_CODE || '11' }}
       TV_PRODUCTION_API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
       TV_UPDATE_PUBLIC_BASE_URL: ${{ vars.TV_UPDATE_PUBLIC_BASE_URL || '' }}
@@ -96,20 +103,24 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Java 17
+        if: ${{ inputs.reuse_artifact_run_id == '' }}
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
+        if: ${{ inputs.reuse_artifact_run_id == '' }}
         uses: android-actions/setup-android@v3
 
       - name: Install Android build packages
+        if: ${{ inputs.reuse_artifact_run_id == '' }}
         # API 37 is currently a preview package and is not on sdkmanager's
         # stable channel yet.
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Run native TV test-only gate
+        if: ${{ inputs.reuse_artifact_run_id == '' }}
         shell: bash
         working-directory: apps/tv-shell
         run: |
@@ -262,6 +273,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare encrypted production signing key
+        if: ${{ inputs.reuse_artifact_run_id == '' }}
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.TV_SIGNING_KEYSTORE_BASE64 }}
@@ -276,6 +288,7 @@ jobs:
           echo "TV_SIGNING_STORE_FILE=$RUNNER_TEMP/egi-tv-release.p12" >> "$GITHUB_ENV"
 
       - name: Build signed release with the repository release gate
+        if: ${{ inputs.reuse_artifact_run_id == '' }}
         shell: bash
         env:
           API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
@@ -306,6 +319,15 @@ jobs:
               -VersionName "$VERSION_NAME"
           fi
 
+      - name: Restore existing signed release artifact for recovery
+        if: ${{ inputs.reuse_artifact_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.resolve.outputs.artifact_name }}
+          run-id: ${{ inputs.reuse_artifact_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/egi-tv-release
+
       - name: Stage immutable release artifact
         id: stage
         shell: bash
@@ -315,12 +337,14 @@ jobs:
           set -euo pipefail
           output_dir="$RUNNER_TEMP/egi-tv-release"
           mkdir -p "$output_dir"
-          source_dir='apps/tv-shell/app/build/outputs/apk/release'
-          cp "$source_dir/app-release.apk" "$output_dir/$ARTIFACT_NAME.apk"
-          cp "$source_dir/app-release.apk.sha256" "$output_dir/$ARTIFACT_NAME.apk.sha256"
-          cp "$source_dir/app-release.apk.manifest.json" "$output_dir/$ARTIFACT_NAME.apk.manifest.json"
-          if [[ -f "$source_dir/app-release.apk.tv-update-manifest.json" ]]; then
-            cp "$source_dir/app-release.apk.tv-update-manifest.json" "$output_dir/$ARTIFACT_NAME.tv-update-manifest.json"
+          if [[ -z "${INPUT_REUSE_ARTIFACT_RUN_ID:-}" ]]; then
+            source_dir='apps/tv-shell/app/build/outputs/apk/release'
+            cp "$source_dir/app-release.apk" "$output_dir/$ARTIFACT_NAME.apk"
+            cp "$source_dir/app-release.apk.sha256" "$output_dir/$ARTIFACT_NAME.apk.sha256"
+            cp "$source_dir/app-release.apk.manifest.json" "$output_dir/$ARTIFACT_NAME.apk.manifest.json"
+            if [[ -f "$source_dir/app-release.apk.tv-update-manifest.json" ]]; then
+              cp "$source_dir/app-release.apk.tv-update-manifest.json" "$output_dir/$ARTIFACT_NAME.tv-update-manifest.json"
+            fi
           fi
 
           actual_sha256="$(sha256sum "$output_dir/$ARTIFACT_NAME.apk" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
@@ -470,7 +494,28 @@ jobs:
           # the immutable file name.
           put_immutable "$prefix/$VERSION_CODE/$ARTIFACT_NAME.apk.manifest.json" "$release_manifest" 'application/octet-stream'
           put_immutable "$prefix/$VERSION_CODE/update-manifest.json" "$update_manifest" 'application/octet-stream'
-          put_immutable "$prefix/latest/latest.json" "$update_manifest" 'application/octet-stream'
+
+          # The versioned APK and release manifests are immutable. The latest
+          # pointer is intentionally mutable: every approved release moves it
+          # to the newest verified manifest. It is still verified byte-for-byte
+          # after the overwrite and never affects the immutable APK URL.
+          put_latest() {
+            local key="$1"
+            local file="$2"
+            local content_type="$3"
+            local upload_url="${API_BASE_URL%/}/tv/update-artifact/$key"
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --max-time 300 \
+              --request POST --upload-file "$file" \
+              --header "Authorization: Bearer $UPDATE_UPLOAD_TOKEN" \
+              --header "Content-Type: $content_type" \
+              "$upload_url"
+            if ! object_matches "$key" "$file"; then
+              echo "Latest manifest checksum verification failed: $key" >&2
+              exit 1
+            fi
+          }
+
+          put_latest "$prefix/latest/latest.json" "$update_manifest" 'application/octet-stream'
 
       - name: Verify public immutable URL without following redirects
         shell: bash
