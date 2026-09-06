@@ -27,7 +27,16 @@ describe('health API', () => {
     expect(response.body).toEqual({
       status: 'ok',
       service: 'room-service-api',
+      environment: 'test',
+      releaseId: 'local',
+      dependencies: {
+        database: 'memory',
+        mediaStorage: 'ok',
+        redis: 'disabled',
+        realtime: 'disabled',
+      },
     });
     expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/u);
   });
 });

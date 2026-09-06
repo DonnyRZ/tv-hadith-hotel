@@ -12,6 +12,29 @@ export type AssignmentStatus = 'ACTIVE' | 'CHECKED_OUT';
 export const MIN_GUEST_STAY_DAYS = 1;
 export const MAX_GUEST_STAY_DAYS = 365;
 
+export interface ReceptionistFolioAmount {
+  currency: string;
+  amount: number;
+}
+
+export interface ReceptionistFolioStatusCounts {
+  NEW: number;
+  IN_PROCESS: number;
+  COMPLETED: number;
+  CANCELLED: number;
+}
+
+export interface ReceptionistFolioSummary {
+  orderCount: number;
+  openOrderCount: number;
+  statusCounts: ReceptionistFolioStatusCounts;
+  itemCount: number;
+  totalsByCurrency: ReceptionistFolioAmount[];
+  unpricedItemCount: number;
+  isTotalComplete: boolean;
+  lastOrderAt: string | null;
+}
+
 export interface RoomReference {
   id: string;
   number: string;
@@ -45,6 +68,7 @@ export interface ReceptionistRoomView {
   room: RoomReference;
   roomStatus: RoomStatus;
   activeAssignment: GuestAssignmentRecord | null;
+  folioSummary: ReceptionistFolioSummary;
 }
 
 export interface GuestAssignmentUpdatedEvent {
@@ -116,6 +140,24 @@ export function cloneRoomView(view: ReceptionistRoomView): ReceptionistRoomView 
     roomStatus: view.roomStatus,
     activeAssignment:
       view.activeAssignment === null ? null : cloneAssignment(view.activeAssignment),
+    folioSummary: {
+      ...view.folioSummary,
+      statusCounts: { ...view.folioSummary.statusCounts },
+      totalsByCurrency: view.folioSummary.totalsByCurrency.map((amount) => ({ ...amount })),
+    },
+  };
+}
+
+export function emptyReceptionistFolioSummary(): ReceptionistFolioSummary {
+  return {
+    orderCount: 0,
+    openOrderCount: 0,
+    statusCounts: { NEW: 0, IN_PROCESS: 0, COMPLETED: 0, CANCELLED: 0 },
+    itemCount: 0,
+    totalsByCurrency: [],
+    unpricedItemCount: 0,
+    isTotalComplete: true,
+    lastOrderAt: null,
   };
 }
 

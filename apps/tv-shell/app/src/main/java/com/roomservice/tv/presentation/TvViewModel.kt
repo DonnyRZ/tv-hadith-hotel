@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.roomservice.tv.data.CreateGuestRequest
 import com.roomservice.tv.data.CreateGuestRequestItem
+import com.roomservice.tv.data.GuestRequestListResponse
 import com.roomservice.tv.data.MenuItem
+import com.roomservice.tv.data.BoutiqueVariant
 import com.roomservice.tv.data.PairingSession
 import com.roomservice.tv.data.TvApiException
 import com.roomservice.tv.data.TvLanguage
@@ -50,13 +52,16 @@ sealed interface TvUiState {
 
 enum class TvStatusMessage {
     REQUEST_SUBMITTED,
-    UNIT_CONFLICT,
 }
 
 data class CartLine(
     val item: MenuItem,
+    val variant: BoutiqueVariant? = null,
     val quantity: Int,
-)
+) {
+    val key: String
+        get() = if (variant === null) item.id else "${item.id}:${variant.id}"
+}
 
 class TvViewModel(
     private val repository: TvRepository,
@@ -69,6 +74,8 @@ class TvViewModel(
     val language: StateFlow<TvLanguage> = mutableLanguage.asStateFlow()
 
     private var hasInitialized = false
+    private var isRefreshingRequests = false
+    private var pendingClientRequestId: String? = null
     fun initialize() {
         if (hasInitialized) {
             return
@@ -103,29 +110,33 @@ class TvViewModel(
         )
     }
 
-    fun addToCart(item: MenuItem) {
-        if (!item.available || !item.active) {
+    fun addToCart(item: MenuItem, variantId: String? = null) {
+        if (!item.active || !item.available) {
+            return
+        }
+        val variant = if (item.variants.isEmpty()) {
+            null
+        } else {
+            item.variants.firstOrNull { candidate -> candidate.id == variantId }
+                ?: item.variants.singleOrNull()
+        }
+        if (item.variants.isNotEmpty() && (variant === null || !variant.active || variant.availableQuantity <= 0)) {
             return
         }
         val ready = mutableUiState.value as? TvUiState.Ready ?: return
+        if (ready.isSubmitting) {
+            return
+        }
         if (ready.snapshot.guestData === null) {
             return
         }
-        val currentUnit = ready.cart.firstOrNull()?.item?.unit
-        if (currentUnit !== null && currentUnit != item.unit) {
-            mutableUiState.value = ready.copy(
-                statusMessage = TvStatusMessage.UNIT_CONFLICT,
-                errorMessage = null,
-                errorCode = null,
-            )
-            return
-        }
-        val existing = ready.cart.firstOrNull { it.item.id == item.id }
+        val lineKey = if (variant === null) item.id else "${item.id}:${variant.id}"
+        val existing = ready.cart.firstOrNull { it.key == lineKey }
         val nextCart = if (existing === null) {
-            ready.cart + CartLine(item = item, quantity = 1)
+            ready.cart + CartLine(item = item, variant = variant, quantity = 1)
         } else if (item.quantityAllowed) {
             ready.cart.map { line ->
-                if (line.item.id == item.id) line.copy(quantity = line.quantity + 1) else line
+                if (line.key == lineKey) line.copy(quantity = line.quantity + 1) else line
             }
         } else {
             ready.cart
@@ -138,11 +149,14 @@ class TvViewModel(
         )
     }
 
-    fun removeFromCart(itemId: String) {
+    fun removeFromCart(lineKey: String) {
         val ready = mutableUiState.value as? TvUiState.Ready ?: return
+        if (ready.isSubmitting) {
+            return
+        }
         val nextCart = ready.cart
             .flatMap { line ->
-                if (line.item.id != itemId) {
+                if (line.key != lineKey) {
                     listOf(line)
                 } else if (line.quantity > 1) {
                     listOf(line.copy(quantity = line.quantity - 1))
@@ -172,13 +186,17 @@ class TvViewModel(
         )
         viewModelScope.launch {
             try {
-                val created = repository.submitRequest(
+                val clientRequestId = pendingClientRequestId ?: newClientRequestId().also {
+                    pendingClientRequestId = it
+                }
+                val created = repository.submitRequestGroup(
                     CreateGuestRequest(
-                        clientRequestId = newClientRequestId(),
+                        clientRequestId = clientRequestId,
                         items = ready.cart.map { line ->
                             CreateGuestRequestItem(
                                 menuItemId = line.item.id,
                                 quantity = line.quantity,
+                                variantId = line.variant?.id,
                             )
                         },
                     ),
@@ -186,9 +204,10 @@ class TvViewModel(
                 val current = mutableUiState.value as? TvUiState.Ready ?: return@launch
                 val currentRequests = current.snapshot.guestData?.requests ?: return@launch
                 val updatedRequests = currentRequests.copy(
-                    items = listOf(created) + currentRequests.items,
-                    total = currentRequests.total + 1,
+                    items = created.requests + currentRequests.items,
+                    total = currentRequests.total + created.requests.size,
                 )
+                pendingClientRequestId = null
                 mutableUiState.value = current.copy(
                     snapshot = current.snapshot.copy(
                         guestData = current.snapshot.guestData?.copy(requests = updatedRequests),
@@ -209,6 +228,37 @@ class TvViewModel(
                     errorMessage = exception.userMessage(),
                     errorCode = exception.errorCode(),
                 )
+            }
+        }
+    }
+
+    fun refreshRequests() {
+        if (isRefreshingRequests || mutableUiState.value !is TvUiState.Ready) {
+            return
+        }
+        isRefreshingRequests = true
+        viewModelScope.launch {
+            try {
+                val requests: GuestRequestListResponse = repository.loadRequests()
+                val current = mutableUiState.value as? TvUiState.Ready ?: return@launch
+                val guestData = current.snapshot.guestData ?: return@launch
+                mutableUiState.value = current.copy(
+                    snapshot = current.snapshot.copy(
+                        guestData = guestData.copy(requests = requests),
+                    ),
+                    errorMessage = null,
+                    errorCode = null,
+                )
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                val current = mutableUiState.value as? TvUiState.Ready ?: return@launch
+                mutableUiState.value = current.copy(
+                    errorMessage = exception.userMessage(),
+                    errorCode = exception.errorCode(),
+                )
+            } finally {
+                isRefreshingRequests = false
             }
         }
     }

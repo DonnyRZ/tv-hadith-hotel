@@ -22,6 +22,34 @@ export class TvDeviceRoomConflictError extends Error {
   }
 }
 
+export class TvDeviceRoomNumberMismatchError extends Error {
+  public constructor() {
+    super('The room ID and room number do not match.');
+    this.name = 'TvDeviceRoomNumberMismatchError';
+  }
+}
+
+export class TvDevicePairingExpiredError extends Error {
+  public constructor() {
+    super('The TV pairing code has expired.');
+    this.name = 'TvDevicePairingExpiredError';
+  }
+}
+
+export class TvDevicePairingAlreadyUsedError extends Error {
+  public constructor() {
+    super('The TV pairing code has already been used.');
+    this.name = 'TvDevicePairingAlreadyUsedError';
+  }
+}
+
+export class TvDevicePairingCodeChangedError extends Error {
+  public constructor() {
+    super('The TV pairing code is no longer the active code for this device.');
+    this.name = 'TvDevicePairingCodeChangedError';
+  }
+}
+
 export interface TvDeviceRepository {
   createPending(input: StartTvProvisioningInput, ttlSeconds: number): Promise<CreatedTvDevice>;
   list(input: ListTvDevicesInput): Promise<{ items: TvDeviceRecord[]; total: number }>;

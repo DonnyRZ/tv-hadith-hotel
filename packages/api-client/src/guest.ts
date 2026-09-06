@@ -1,11 +1,46 @@
 import type { LocalizedText } from '@room-service/translations';
 
 export type UnitCode =
-  'SPA' | 'RESTAURANT' | 'LOUNGE' | 'HOUSEKEEPING' | 'BEAUTY_AND_SALON' | 'CAFE';
+  | 'SPA'
+  | 'RESTAURANT'
+  | 'LOUNGE'
+  | 'HOUSEKEEPING'
+  | 'BEAUTY_AND_SALON'
+  | 'CAFE'
+  | 'BUTIK_INDONESIA';
 export type DepartmentCode =
-  'SPA' | 'FOOD_AND_BEVERAGES' | 'HOUSEKEEPING' | 'BEAUTY_AND_SALON' | 'CAFE';
+  'SPA' | 'FOOD_AND_BEVERAGES' | 'HOUSEKEEPING' | 'BEAUTY_AND_SALON' | 'CAFE' | 'BUTIK_INDONESIA';
 export type MenuItemKind = 'PRODUCT' | 'SERVICE';
-export type RequestStatus = 'NEW' | 'IN_PROCESS' | 'COMPLETED';
+export type RequestStatus = 'NEW' | 'IN_PROCESS' | 'COMPLETED' | 'CANCELLED';
+
+export interface GuestVariantOption {
+  code: string;
+  label: LocalizedText;
+  value: LocalizedText;
+}
+
+export interface GuestMenuVariant {
+  id: string;
+  menuItemId: string;
+  sku: string;
+  options: GuestVariantOption[];
+  price: number;
+  currency: string;
+  active: boolean;
+  availableQuantity: number;
+  sortOrder: number;
+}
+
+export interface GuestMenuCategory {
+  id: string;
+  localizedName: LocalizedText;
+  localizedDescription: LocalizedText | null;
+  imageMediaId: string | null;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface GuestMenuItem {
   id: string;
@@ -25,6 +60,9 @@ export interface GuestMenuItem {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  categoryId?: string;
+  category?: GuestMenuCategory;
+  variants?: GuestMenuVariant[];
 }
 
 export interface GuestDepartmentUnit {
@@ -42,6 +80,13 @@ export interface GuestDepartment {
   units: GuestDepartmentUnit[];
 }
 
+export interface GuestStay {
+  checkInAt: string;
+  checkOutAt: string;
+  totalDays: number;
+  timeZone: string;
+}
+
 export interface GuestContext {
   room: { id: string; number: string };
   roomStatus: 'OCCUPIED';
@@ -50,6 +95,7 @@ export interface GuestContext {
     guestName: string;
     personalized: true;
   };
+  stay: GuestStay;
   availableUnits: UnitCode[];
 }
 
@@ -63,6 +109,9 @@ export interface GuestRequestItem {
   note: string | null;
   unitPrice: number | null;
   currency: string | null;
+  variantId?: string | null;
+  sku?: string | null;
+  variantOptions?: GuestVariantOption[] | null;
 }
 
 export interface GuestRequest {
@@ -76,6 +125,10 @@ export interface GuestRequest {
   requestedAt: string;
   confirmedAt: string | null;
   completedAt: string | null;
+  reservationExpiresAt: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  cancellationSource: 'STAFF' | 'AUTO_EXPIRY' | null;
   statusHistory: Array<{
     id: string;
     fromStatus: RequestStatus | null;
@@ -89,6 +142,11 @@ export interface GuestRequest {
   }>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface GuestRequestGroup {
+  clientRequestId: string;
+  requests: GuestRequest[];
 }
 
 export interface GuestApiErrorDetail {
@@ -121,6 +179,7 @@ export interface CreateGuestRequestInput {
     menuItemId: string;
     quantity: number;
     note?: string | null;
+    variantId?: string | null;
   }>;
   guestNote?: string | null;
 }
@@ -130,9 +189,16 @@ export interface GuestApiClient {
   listDepartments(): Promise<{ items: GuestDepartment[] }>;
   listMenus(options: {
     unit: UnitCode;
+    categoryId?: string;
     page?: number;
     pageSize?: number;
-  }): Promise<{ items: GuestMenuItem[]; page: number; pageSize: number; total: number }>;
+  }): Promise<{
+    items: GuestMenuItem[];
+    categories?: GuestMenuCategory[];
+    page: number;
+    pageSize: number;
+    total: number;
+  }>;
   getMenuItem(menuItemId: string): Promise<GuestMenuItem>;
   listRequests(options?: {
     page?: number;
@@ -140,6 +206,7 @@ export interface GuestApiClient {
     status?: RequestStatus;
   }): Promise<{ items: GuestRequest[]; page: number; pageSize: number; total: number }>;
   createRequest(input: CreateGuestRequestInput): Promise<GuestRequest>;
+  createRequestGroup(input: CreateGuestRequestInput): Promise<GuestRequestGroup>;
   getRequest(requestId: string): Promise<GuestRequest>;
 }
 
@@ -202,9 +269,13 @@ export function createGuestApiClient(options: GuestApiClientOptions = {}): Guest
     getContext: () => request<GuestContext>('/guest/context'),
     listDepartments: () => request<{ items: GuestDepartment[] }>('/guest/departments'),
     listMenus: (query) =>
-      request<{ items: GuestMenuItem[]; page: number; pageSize: number; total: number }>(
-        withQuery('/guest/menus', query),
-      ),
+      request<{
+        items: GuestMenuItem[];
+        categories?: GuestMenuCategory[];
+        page: number;
+        pageSize: number;
+        total: number;
+      }>(withQuery('/guest/menus', query)),
     getMenuItem: (menuItemId) =>
       request<GuestMenuItem>(`/guest/menus/${encodeURIComponent(menuItemId)}`),
     listRequests: (query = {}) =>
@@ -213,6 +284,11 @@ export function createGuestApiClient(options: GuestApiClientOptions = {}): Guest
       ),
     createRequest: (input) =>
       request<GuestRequest>('/guest/requests', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    createRequestGroup: (input) =>
+      request<GuestRequestGroup>('/guest/request-groups', {
         method: 'POST',
         body: JSON.stringify(input),
       }),

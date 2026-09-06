@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Hadith Hotel</string>
+    <string name="app_name">EGI TV</string>
     <string name="tv_loading_title">Загрузка</string>
     <string name="tv_loading_message">Готовим сервисы для вашего номера.</string>
     <string name="tv_pairing_title">Подключите телевизор</string>
@@ -14,9 +14,18 @@
     <string name="tv_error_pairing_expired">Срок действия кода истёк. Готовим новый код.</string>
     <string name="tv_retry">Повторить</string>
     <string name="tv_request_submitted">Запрос отправлен.</string>
-    <string name="tv_request_unit_conflict">Один запрос может содержать позиции только одного сервиса.</string>
+    <string name="tv_combined_request">Общий запрос</string>
     <string name="tv_brand">HADITH HOTEL</string>
-    <string name="tv_room">Номер %1$s</string>
+    <string name="tv_room_label">НОМЕР</string>
+    <string name="tv_stay_check_in">ЗАЕЗД</string>
+    <string name="tv_stay_check_out">ВЫЕЗД</string>
+    <string name="tv_stay_status">ПРОЖИВАНИЕ</string>
+    <string name="tv_stay_days_remaining_one">Остался %1$d день</string>
+    <string name="tv_stay_days_remaining">Осталось дней: %1$d</string>
+    <string name="tv_stay_checkout_today">Выезд сегодня · %1$s</string>
+    <string name="tv_stay_total_days">Проживание · %1$d дн.</string>
+    <string name="tv_stay_ended">Срок проживания завершён</string>
+    <string name="tv_stay_unavailable">Данные о проживании недоступны</string>
     <string name="tv_home">Главная</string>
     <string name="tv_my_requests">Мои запросы</string>
     <string name="tv_cart">Выбрано (%1$d)</string>
@@ -26,6 +35,14 @@
     <string name="tv_service_unavailable">Станет доступно после заселения гостя.</string>
     <string name="tv_about">Об отеле</string>
     <string name="tv_about_description">Hadith Hotel, комфорт и гостеприимство.</string>
+    <string name="tv_gallery_stay_description">Тишина, свет и тёплые детали номеров и люксов.</string>
+    <string name="tv_gallery_taste_description">Избранные вкусы Saji Nusantara и 7Oz Espresso.</string>
+    <string name="tv_gallery_rest_description">Вода, пар, уход и тихие моменты, созданные для отдыха.</string>
+    <string name="tv_gallery_open">Открыть крупнее</string>
+    <string name="tv_gallery_photo">%1$d / %2$d</string>
+    <string name="tv_gallery_saji">Saji Nusantara</string>
+    <string name="tv_gallery_7oz">7Oz Espresso</string>
+    <string name="tv_gallery_unavailable">Галерея пока недоступна.</string>
     <string name="tv_destinations">Места рядом</string>
     <string name="tv_destinations_description">Исторические места Самарканда, которые вдохновляют.</string>
     <string name="tv_welcome_hotel">Добро пожаловать в Hadith Hotel</string>
@@ -37,12 +54,14 @@
     <string name="tv_cafe">7oz Espresso Cafe</string>
     <string name="tv_spa">SPA</string>
     <string name="tv_beauty_salon">Beauty Salon</string>
+    <string name="tv_butik_indonesia">Butik Indonesia</string>
     <string name="tv_explore">Открыть</string>
     <string name="tv_unavailable">Сейчас недоступно</string>
     <string name="tv_saji_nusantara">Saji Nusantara</string>
     <string name="tv_lounge">Lounge</string>
     <string name="tv_fnb_description">Вкусная пауза в Saji Nusantara и Lounge.</string>
     <string name="tv_menu_description">Выберите услугу из доступных позиций.</string>
+    <string name="tv_all">Все</string>
     <string name="tv_view_cart">Посмотреть выбор</string>
     <string name="tv_no_menu">В этой услуге пока нет доступного меню.</string>
     <string name="tv_menu_not_configured">Эта услуга ещё не настроена.</string>
@@ -51,7 +70,13 @@
     <string name="tv_next">Далее</string>
     <string name="tv_add">Добавить</string>
     <string name="tv_price_not_set">Цена не указана</string>
+    <string name="tv_select_variant">Выберите вариант</string>
+    <string name="tv_stock">Остаток: %1$d</string>
+    <string name="tv_sku">SKU: %1$s</string>
+    <string name="tv_out_of_stock">Нет в наличии</string>
     <string name="tv_your_request">Ваш запрос</string>
+    <string name="tv_cart_description">Проверьте выбор и отправьте запрос.</string>
+    <string name="tv_requests_description">Здесь можно отслеживать отправленные запросы.</string>
     <string name="tv_cart_empty">Выбор пока пуст.</string>
     <string name="tv_remove">Удалить</string>
     <string name="tv_submitting">Отправка…</string>
@@ -60,6 +85,17 @@
     <string name="tv_status_new">Новый</string>
     <string name="tv_status_in_process">В работе</string>
     <string name="tv_status_completed">Выполнено</string>
+    <string name="tv_status_cancelled">Отменено</string>
     <string name="tv_back">Назад</string>
     <string name="tv_not_ready">Данные пока не готовы.</string>
+    <string name="tv_update_brand">EGI TV</string>
+    <string name="tv_update_title">Доступна новая версия</string>
+    <string name="tv_update_ready_message">EGI TV %1$s загружена и проверена. Продолжите установку.</string>
+    <string name="tv_update_permission_message">Разрешите EGI TV устанавливать обновления в настройках Android и вернитесь сюда.</string>
+    <string name="tv_update_failed">Не удалось подготовить обновление</string>
+    <string name="tv_update_failed_message">Не удалось безопасно подготовить обновление. Повторите попытку.</string>
+    <string name="tv_update_install">Установить</string>
+    <string name="tv_update_open_settings">Открыть настройки</string>
+    <string name="tv_update_retry">Повторить</string>
+    <string name="tv_update_later">Позже</string>
 </resources>

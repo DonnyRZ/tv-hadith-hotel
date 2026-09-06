@@ -153,6 +153,8 @@ private class FakeTvApi : TvApi {
         )
     }
 
+    override suspend fun getUpdateManifest(): TvUpdateManifest = TvUpdateManifest()
+
     override suspend fun getDepartments(): DepartmentListResponse {
         departmentsCalls += 1
         return DepartmentListResponse(
@@ -192,6 +194,9 @@ private class FakeTvApi : TvApi {
     }
 
     override suspend fun createRequest(request: CreateGuestRequest): GuestRequest = error("not used")
+
+    override suspend fun createRequestGroup(request: CreateGuestRequest): GuestRequestGroup =
+        error("not used")
 }
 
 private fun sampleContext(): TvContext = TvContext(

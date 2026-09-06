@@ -18,6 +18,7 @@ import type { PublicStaffUser } from '../auth/auth.types';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { StaffSessionGuard } from '../auth/guards/staff-session.guard';
 import { AssignGuestDto } from './dto/assign-guest.dto';
+import { ListFolioOrdersDto } from './dto/list-folio-orders.dto';
 import { ListReceptionistRoomsDto } from './dto/list-receptionist-rooms.dto';
 import { UpdateGuestAssignmentDto } from './dto/update-guest-assignment.dto';
 import { ReceptionistService } from './receptionist.service';
@@ -37,6 +38,34 @@ export class ReceptionistController {
   @RequirePermissions('receptionist:rooms:view')
   public getRoom(@Param('roomId', new ParseUUIDPipe()) roomId: string) {
     return this.receptionistService.getRoom(roomId);
+  }
+
+  @Get('rooms/:roomId/folio')
+  @RequirePermissions('receptionist:folio:view')
+  public getActiveFolio(
+    @Param('roomId', new ParseUUIDPipe()) roomId: string,
+    @Query() query: ListFolioOrdersDto,
+  ) {
+    return this.receptionistService.getActiveFolio(roomId, query);
+  }
+
+  @Get('rooms/:roomId/folio/history')
+  @RequirePermissions('receptionist:folio:view')
+  public listFolioHistory(
+    @Param('roomId', new ParseUUIDPipe()) roomId: string,
+    @Query() query: ListFolioOrdersDto,
+  ) {
+    return this.receptionistService.listFolioHistory(roomId, query);
+  }
+
+  @Get('rooms/:roomId/folio/history/:assignmentId')
+  @RequirePermissions('receptionist:folio:view')
+  public getFolioHistoryDetail(
+    @Param('roomId', new ParseUUIDPipe()) roomId: string,
+    @Param('assignmentId', new ParseUUIDPipe()) assignmentId: string,
+    @Query() query: ListFolioOrdersDto,
+  ) {
+    return this.receptionistService.getFolioHistoryDetail(roomId, assignmentId, query);
   }
 
   @Post('rooms/:roomId/guest-assignment')

@@ -4,10 +4,21 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 
 import { ApiException } from '../auth/api-exception';
 import type { PublicStaffUser } from '../auth/auth.types';
+import { UNIT_CODES } from '../rbac/rbac.types';
+import { REQUEST_REPOSITORY } from '../requests/request.repository';
+import type { RequestRepository } from '../requests/request.repository';
 import type { AssignGuestDto } from './dto/assign-guest.dto';
+import type { ListFolioOrdersDto } from './dto/list-folio-orders.dto';
 import type { ListReceptionistRoomsDto } from './dto/list-receptionist-rooms.dto';
 import type { UpdateGuestAssignmentDto } from './dto/update-guest-assignment.dto';
 import { RoomAssignmentEventBus } from './room-assignment-events';
+import {
+  emptyFolioResponse,
+  summarizeFolioRequests,
+  toReceptionistFolioOrder,
+  type ReceptionistFolioHistoryListResponse,
+  type ReceptionistFolioResponse,
+} from './receptionist-folio';
 import {
   GuestAssignmentConflictError,
   GuestAssignmentNotFoundError,
@@ -33,6 +44,8 @@ export class ReceptionistService {
     @Inject(RECEPTIONIST_REPOSITORY)
     private readonly repository: ReceptionistRepository,
     private readonly eventBus: RoomAssignmentEventBus,
+    @Inject(REQUEST_REPOSITORY)
+    private readonly requestRepository: RequestRepository,
   ) {}
 
   public async listRooms(query: ListReceptionistRoomsDto) {
@@ -46,13 +59,121 @@ export class ReceptionistService {
         ? {}
         : { search: query.search.trim() }),
     });
-    return { items: result.items, page, pageSize, total: result.total };
+    return {
+      items: await this.withFolioSummaries(result.items),
+      page,
+      pageSize,
+      total: result.total,
+    };
   }
 
   public async getRoom(roomId: string): Promise<ReceptionistRoomView> {
     const room = await this.repository.findRoom(roomId);
     if (room === null) throw this.roomNotFound();
-    return room;
+    const [withSummary] = await this.withFolioSummaries([room]);
+    return withSummary ?? room;
+  }
+
+  public async getActiveFolio(
+    roomId: string,
+    query: ListFolioOrdersDto,
+  ): Promise<ReceptionistFolioResponse> {
+    const room = await this.repository.findRoom(roomId);
+    if (room === null) throw this.roomNotFound();
+
+    const page = query.page ?? DEFAULT_PAGE;
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const assignment = room.activeAssignment;
+    if (assignment === null) return emptyFolioResponse(room.room, null, page, pageSize);
+
+    const result = await this.requestRepository.list({
+      units: UNIT_CODES,
+      guestAssignmentId: assignment.id,
+      page,
+      pageSize,
+    });
+    const allForSummary = await this.requestRepository.listByGuestAssignmentIds([assignment.id]);
+    return {
+      room: { ...room.room },
+      assignment: { ...assignment, room: { ...assignment.room } },
+      orders: result.items.map(toReceptionistFolioOrder),
+      summary: summarizeFolioRequests(allForSummary),
+      page,
+      pageSize,
+      total: result.total,
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+
+  public async listFolioHistory(
+    roomId: string,
+    query: ListFolioOrdersDto,
+  ): Promise<ReceptionistFolioHistoryListResponse> {
+    const room = await this.repository.findRoom(roomId);
+    if (room === null) throw this.roomNotFound();
+
+    const page = query.page ?? DEFAULT_PAGE;
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const assignments = await this.repository.listGuestAssignmentsByRoomId(
+      roomId,
+      page,
+      pageSize,
+    );
+    const requests = await this.requestRepository.listByGuestAssignmentIds(
+      assignments.items.map((assignment) => assignment.id),
+    );
+    const requestsByAssignment = new Map<string, typeof requests>();
+    for (const request of requests) {
+      if (request.guestAssignmentId === null) continue;
+      const assignmentRequests = requestsByAssignment.get(request.guestAssignmentId) ?? [];
+      assignmentRequests.push(request);
+      requestsByAssignment.set(request.guestAssignmentId, assignmentRequests);
+    }
+
+    return {
+      room: { ...room.room },
+      items: assignments.items.map((assignment) => ({
+        assignment: { ...assignment, room: { ...assignment.room } },
+        summary: summarizeFolioRequests(requestsByAssignment.get(assignment.id) ?? []),
+      })),
+      page,
+      pageSize,
+      total: assignments.total,
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+
+  public async getFolioHistoryDetail(
+    roomId: string,
+    assignmentId: string,
+    query: ListFolioOrdersDto,
+  ): Promise<ReceptionistFolioResponse> {
+    const room = await this.repository.findRoom(roomId);
+    if (room === null) throw this.roomNotFound();
+    const assignment = await this.repository.findGuestAssignmentByRoomId(roomId, assignmentId);
+    if (assignment === null || assignment.status !== 'CHECKED_OUT') {
+      throw this.guestAssignmentNotFound();
+    }
+
+    const page = query.page ?? DEFAULT_PAGE;
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const result = await this.requestRepository.list({
+      units: UNIT_CODES,
+      guestAssignmentId: assignment.id,
+      page,
+      pageSize,
+    });
+    const allForSummary = await this.requestRepository.listByGuestAssignmentIds([assignment.id]);
+    return {
+      room: { ...room.room },
+      assignment: { ...assignment, room: { ...assignment.room } },
+      orders: result.items.map(toReceptionistFolioOrder),
+      summary: summarizeFolioRequests(allForSummary),
+      page,
+      pageSize,
+      total: result.total,
+      lastUpdated: new Date().toISOString(),
+    };
   }
 
   public async assignGuest(
@@ -203,5 +324,38 @@ export class ReceptionistService {
       code: 'ROOM_NOT_FOUND',
       message: 'The requested guest room does not exist.',
     });
+  }
+
+  private guestAssignmentNotFound(): ApiException {
+    return new ApiException(HttpStatus.NOT_FOUND, {
+      code: 'GUEST_ASSIGNMENT_NOT_FOUND',
+      message: 'The requested guest assignment does not exist for this room.',
+    });
+  }
+
+  private async withFolioSummaries(
+    rooms: readonly ReceptionistRoomView[],
+  ): Promise<ReceptionistRoomView[]> {
+    const assignmentIds = rooms
+      .map((room) => room.activeAssignment?.id)
+      .filter((id): id is string => id !== undefined);
+    if (assignmentIds.length === 0) return rooms.map((room) => ({ ...room }));
+
+    const requests = await this.requestRepository.listByGuestAssignmentIds(assignmentIds);
+    const requestsByAssignment = new Map<string, typeof requests>();
+    for (const request of requests) {
+      if (request.guestAssignmentId === null) continue;
+      const assignmentRequests = requestsByAssignment.get(request.guestAssignmentId) ?? [];
+      assignmentRequests.push(request);
+      requestsByAssignment.set(request.guestAssignmentId, assignmentRequests);
+    }
+
+    return rooms.map((room) => ({
+      ...room,
+      folioSummary:
+        room.activeAssignment === null
+          ? room.folioSummary
+          : summarizeFolioRequests(requestsByAssignment.get(room.activeAssignment.id) ?? []),
+    }));
   }
 }

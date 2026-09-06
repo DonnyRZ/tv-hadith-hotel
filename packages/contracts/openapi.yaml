@@ -32,12 +32,18 @@ tags:
   - name: Room Manager
     description: Read-only monitoring for SPA, Restaurant, Lounge, and Housekeeping.
   - name: Receptionist
-    description: Manual guest-to-room assignment and checkout flow.
+    description: |
+      Manual guest-to-room assignment and checkout flow, plus the Receptionist's
+      Housekeeping request queue.
   - name: Menu Management
     description: |
       Flat menu/service catalog management for the staff member's own unit,
       subject to menu:manage permission. Restaurant, Lounge, Cafe, SPA, and
       Beauty & Salon are CMS-enabled; categories are not part of the contract.
+  - name: Butik Indonesia
+    description: Butik Indonesia catalog, stock, media, and room-order operations.
+  - name: Media
+    description: Authenticated catalog media upload and public media delivery.
   - name: Staff Management
     description: Superadmin-only staff user and role administration.
 x-realtime:
@@ -63,7 +69,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status, service]
+                required: [status, service, environment, releaseId, dependencies]
                 properties:
                   status:
                     type: string
@@ -71,6 +77,28 @@ paths:
                   service:
                     type: string
                     example: room-service-api
+                  environment:
+                    type: string
+                    example: production
+                  releaseId:
+                    type: string
+                    example: api-2026-09-01.1
+                  dependencies:
+                    type: object
+                    required: [database, mediaStorage, redis, realtime]
+                    properties:
+                      database:
+                        type: string
+                        enum: [ok, memory, unavailable]
+                      mediaStorage:
+                        type: string
+                        enum: [ok, unavailable]
+                      redis:
+                        type: string
+                        enum: [ok, memory, disabled, unavailable]
+                      realtime:
+                        type: string
+                        enum: [ok, memory, disabled, unavailable]
         '400':
           description: Request is malformed.
 
@@ -196,6 +224,7 @@ paths:
         - TvDeviceCredential: []
       parameters:
         - $ref: '#/components/parameters/GuestUnitFilter'
+        - $ref: '#/components/parameters/GuestCategoryFilter'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
       responses:
@@ -261,9 +290,10 @@ paths:
       operationId: createGuestRequest
       summary: Submit a request or order
       description: |
-        Creates a NEW request. All submitted menu items must resolve to the
-        same unit so that backend routing is unambiguous. The room is derived
-        from the QR or TV context, never from the request body.
+        Creates a NEW request for one unit. This legacy endpoint remains
+        available for clients that submit one service at a time. For a
+        combined guest cart spanning multiple units, use /guest/request-groups.
+        The room is derived from the QR or TV context, never from the request body.
       security:
         - GuestAccessToken: []
         - TvDeviceCredential: []
@@ -288,6 +318,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GuestRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/GuestContextUnauthorized'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/RequestConflict'
+
+  /guest/request-groups:
+    post:
+      tags: [Guest Requests]
+      operationId: createGuestRequestGroup
+      summary: Submit one combined cart across multiple services
+      description: |
+        Validates the complete cart and creates one child request per unit in
+        an atomic operation. Every child request shares the same client request
+        ID, so retrying the same payload is idempotent. The room is derived
+        from the QR or TV context, never from the request body.
+      security:
+        - GuestAccessToken: []
+        - TvDeviceCredential: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGuestRequest'
+      responses:
+        '201':
+          description: Combined request with one child request per unit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestRequestGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -338,6 +403,29 @@ paths:
           $ref: '#/components/responses/DeviceUnauthorized'
         '404':
           $ref: '#/components/responses/ContextNotFound'
+
+  /tv/update-manifest:
+    get:
+      tags: [TV]
+      operationId: getTvUpdateManifest
+      summary: Get the public Smart TV self-update manifest
+      description: Returns non-secret release metadata. The APK itself is served from immutable HTTPS storage and is verified by the TV before Android installation.
+      security: []
+      responses:
+        '200':
+          description: TV update metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TvUpdateManifest'
+        '400':
+          description: The configured update manifest is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /tv/provisioning/start:
     post:
@@ -528,8 +616,9 @@ paths:
       summary: List requests visible to the authenticated department
       description: |
         The server scopes results by the staff user's department role. Food &
-        Beverages may filter between Restaurant and Lounge; other departments
-        can only see their own unit.
+        Beverages may filter between Restaurant and Lounge. Housekeeping staff
+        can see Housekeeping only, and Receptionists can see Housekeeping only
+        from this endpoint.
       security:
         - StaffSession: []
       parameters:
@@ -627,6 +716,65 @@ paths:
         '409':
           $ref: '#/components/responses/InvalidStatusTransition'
 
+  /department/requests/{requestId}/cancel:
+    post:
+      tags: [Department Requests, Butik Indonesia]
+      operationId: cancelDepartmentRequest
+      summary: Cancel an open request
+      description: Cancels a NEW or IN_PROCESS request and releases any Butik Indonesia stock reservation.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRequest'
+      responses:
+        '200':
+          description: Request cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/InvalidStatusTransition'
+
+  /internal/boutique/reservations/expire:
+    post:
+      tags: [Butik Indonesia]
+      operationId: expireBoutiqueReservations
+      summary: Expire stale Butik Indonesia reservations
+      description: Internal worker endpoint. Cancels NEW orders older than the reservation window and releases their stock reservations.
+      security:
+        - InternalWorkerSecret: []
+      responses:
+        '200':
+          description: Number of reservations expired in this run.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expired]
+                properties:
+                  expired:
+                    type: integer
+                    minimum: 0
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /room-manager/requests:
     get:
       tags: [Room Manager]
@@ -721,6 +869,85 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReceptionistRoom'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/rooms/{roomId}/folio:
+    get:
+      tags: [Receptionist]
+      operationId: getReceptionistActiveFolio
+      summary: Get the active guest folio for a room
+      description: Read-only folio across every guest service unit for the room's current assignment.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Active stay folio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceptionistFolioResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/rooms/{roomId}/folio/history:
+    get:
+      tags: [Receptionist]
+      operationId: listReceptionistFolioHistory
+      summary: List previous guest stays for a room
+      description: Historical assignments are partitioned by room and never mixed with the active stay.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Previous room assignments with lightweight folio summaries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceptionistFolioHistoryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /receptionist/rooms/{roomId}/folio/history/{assignmentId}:
+    get:
+      tags: [Receptionist]
+      operationId: getReceptionistFolioHistoryDetail
+      summary: Get one historical guest folio for a room
+      description: The server verifies that the historical assignment belongs to the requested room.
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/AssignmentId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Historical stay folio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceptionistFolioResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1349,6 +1576,515 @@ paths:
         '409':
           $ref: '#/components/responses/ResourceConflict'
 
+  /management/boutique/categories:
+    get:
+      tags: [Butik Indonesia]
+      operationId: listBoutiqueCategories
+      summary: List Butik Indonesia categories
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IncludeInactive'
+      responses:
+        '200':
+          description: Butik Indonesia categories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BoutiqueCategory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Butik Indonesia]
+      operationId: createBoutiqueCategory
+      summary: Create a Butik Indonesia category
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBoutiqueCategoryRequest'
+      responses:
+        '201':
+          description: Category created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueCategory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/categories/{categoryId}:
+    patch:
+      tags: [Butik Indonesia]
+      operationId: updateBoutiqueCategory
+      summary: Update a Butik Indonesia category
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueCategoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBoutiqueCategoryRequest'
+      responses:
+        '200':
+          description: Category updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueCategory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/categories/{categoryId}/activate:
+    post:
+      tags: [Butik Indonesia]
+      operationId: activateBoutiqueCategory
+      summary: Activate a Butik Indonesia category
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueCategoryId'
+      responses:
+        '200':
+          description: Category activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueCategory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/boutique/categories/{categoryId}/deactivate:
+    post:
+      tags: [Butik Indonesia]
+      operationId: deactivateBoutiqueCategory
+      summary: Deactivate a Butik Indonesia category
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueCategoryId'
+      responses:
+        '200':
+          description: Category deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueCategory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/boutique/products:
+    get:
+      tags: [Butik Indonesia]
+      operationId: listBoutiqueProducts
+      summary: List Butik Indonesia products and variants
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueCategoryFilter'
+        - $ref: '#/components/parameters/IncludeInactive'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Butik Indonesia products.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueProductListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Butik Indonesia]
+      operationId: createBoutiqueProduct
+      summary: Create a Butik Indonesia product with variants
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBoutiqueProductRequest'
+      responses:
+        '201':
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueProduct'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/products/{menuItemId}:
+    get:
+      tags: [Butik Indonesia]
+      operationId: getBoutiqueProduct
+      summary: Get one Butik Indonesia product
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Product detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueProduct'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+    patch:
+      tags: [Butik Indonesia]
+      operationId: updateBoutiqueProduct
+      summary: Update a Butik Indonesia product
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBoutiqueProductRequest'
+      responses:
+        '200':
+          description: Product updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueProduct'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/products/{menuItemId}/activate:
+    post:
+      tags: [Butik Indonesia]
+      operationId: activateBoutiqueProduct
+      summary: Activate a Butik Indonesia product
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Product activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueProduct'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/boutique/products/{menuItemId}/deactivate:
+    post:
+      tags: [Butik Indonesia]
+      operationId: deactivateBoutiqueProduct
+      summary: Deactivate a Butik Indonesia product
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      responses:
+        '200':
+          description: Product deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueProduct'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/boutique/products/{menuItemId}/variants:
+    post:
+      tags: [Butik Indonesia]
+      operationId: createBoutiqueVariant
+      summary: Add a variant to a Butik Indonesia product
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/MenuItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBoutiqueVariantRequest'
+      responses:
+        '201':
+          description: Variant created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueVariant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/variants/{variantId}:
+    patch:
+      tags: [Butik Indonesia]
+      operationId: updateBoutiqueVariant
+      summary: Update a Butik Indonesia variant
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueVariantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBoutiqueVariantRequest'
+      responses:
+        '200':
+          description: Variant updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueVariant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/variants/{variantId}/activate:
+    post:
+      tags: [Butik Indonesia]
+      operationId: activateBoutiqueVariant
+      summary: Activate a Butik Indonesia variant
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueVariantId'
+      responses:
+        '200':
+          description: Variant activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueVariant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/boutique/variants/{variantId}/deactivate:
+    post:
+      tags: [Butik Indonesia]
+      operationId: deactivateBoutiqueVariant
+      summary: Deactivate a Butik Indonesia variant
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueVariantId'
+      responses:
+        '200':
+          description: Variant deactivated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueVariant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /management/boutique/variants/{variantId}/stock-adjustments:
+    post:
+      tags: [Butik Indonesia]
+      operationId: adjustBoutiqueStock
+      summary: Adjust stock for a Butik Indonesia variant
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueVariantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockAdjustmentRequest'
+      responses:
+        '200':
+          description: Stock adjusted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoutiqueVariant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+        '409':
+          $ref: '#/components/responses/ResourceConflict'
+
+  /management/boutique/variants/{variantId}/stock-movements:
+    get:
+      tags: [Butik Indonesia]
+      operationId: listBoutiqueStockMovements
+      summary: List stock audit movements
+      security:
+        - StaffSession: []
+      parameters:
+        - $ref: '#/components/parameters/BoutiqueVariantId'
+      responses:
+        '200':
+          description: Stock audit movements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StockMovement'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
+  /media/upload:
+    post:
+      tags: [Media]
+      operationId: uploadMedia
+      summary: Upload catalog media to object storage
+      security:
+        - StaffSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Media uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /media/{mediaId}:
+    get:
+      tags: [Media]
+      operationId: getMedia
+      summary: Deliver uploaded catalog media
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/MediaId'
+      responses:
+        '200':
+          description: Image media.
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+            image/avif: {}
+        '404':
+          $ref: '#/components/responses/ResourceNotFound'
+
 components:
   securitySchemes:
     StaffSession:
@@ -1366,6 +2102,11 @@ components:
       in: header
       name: X-Device-Credential
       description: Credential for the Smart TV device mapped to a room.
+    InternalWorkerSecret:
+      type: apiKey
+      in: header
+      name: X-Internal-Worker-Secret
+      description: Secret used only by the reservation-expiry worker. It must never be exposed to guest or staff clients.
   parameters:
     Page:
       name: page
@@ -1431,6 +2172,14 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/UnitCode'
+    GuestCategoryFilter:
+      name: categoryId
+      in: query
+      description: Optional Butik Indonesia category filter.
+      required: false
+      schema:
+        type: string
+        format: uuid
     MonitoredUnitFilter:
       name: unit
       in: query
@@ -1484,6 +2233,34 @@ components:
         format: uuid
     MenuItemId:
       name: menuItemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BoutiqueCategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BoutiqueVariantId:
+      name: variantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BoutiqueCategoryFilter:
+      name: categoryId
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+    MediaId:
+      name: mediaId
       in: path
       required: true
       schema:
@@ -1588,8 +2365,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    ServiceUnavailable:
+      description: A required service dependency is unavailable or not configured.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     PairingExpired:
       description: The one-time TV pairing code has expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InternalServerError:
+      description: The API could not complete the request.
       content:
         application/json:
           schema:
@@ -1597,7 +2386,7 @@ components:
   schemas:
     ApiError:
       type: object
-      required: [statusCode, code, message, timestamp]
+      required: [statusCode, code, message, requestId, environment, releaseId, timestamp]
       properties:
         statusCode:
           type: integer
@@ -1616,6 +2405,14 @@ components:
           type: string
           description: Correlation ID for support and audit logs.
           example: 0d4f2e0b-2f37-4f90-9cf7-96b13e4e4ca7
+        environment:
+          type: string
+          description: Non-secret runtime environment identity.
+          example: production
+        releaseId:
+          type: string
+          description: Non-secret API release identity.
+          example: api-2026-09-01.1
         timestamp:
           type: string
           format: date-time
@@ -1642,6 +2439,7 @@ components:
         - HOUSEKEEPING
         - BEAUTY_AND_SALON
         - CAFE
+        - BUTIK_INDONESIA
     DepartmentCode:
       type: string
       enum:
@@ -1650,6 +2448,7 @@ components:
         - HOUSEKEEPING
         - BEAUTY_AND_SALON
         - CAFE
+        - BUTIK_INDONESIA
     UnitCode:
       type: string
       enum:
@@ -1659,12 +2458,13 @@ components:
         - HOUSEKEEPING
         - BEAUTY_AND_SALON
         - CAFE
+        - BUTIK_INDONESIA
     MonitoredUnitCode:
       type: string
       enum: [SPA, RESTAURANT, LOUNGE, HOUSEKEEPING]
     RequestStatus:
       type: string
-      enum: [NEW, IN_PROCESS, COMPLETED]
+      enum: [NEW, IN_PROCESS, COMPLETED, CANCELLED]
     RoomStatus:
       type: string
       enum: [VACANT, OCCUPIED]
@@ -1984,9 +2784,29 @@ components:
         personalized:
           type: boolean
           example: true
+    GuestStay:
+      type: object
+      required: [checkInAt, checkOutAt, totalDays, timeZone]
+      properties:
+        checkInAt:
+          type: string
+          format: date-time
+          description: Server timestamp when the active room assignment started.
+        checkOutAt:
+          type: string
+          format: date-time
+          description: Server-calculated end of the planned guest stay.
+        totalDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          example: 3
+        timeZone:
+          type: string
+          example: Asia/Tashkent
     GuestContext:
       type: object
-      required: [room, roomStatus, welcome, availableUnits]
+      required: [room, roomStatus, welcome, stay, availableUnits]
       properties:
         room:
           $ref: '#/components/schemas/RoomReference'
@@ -1994,6 +2814,8 @@ components:
           $ref: '#/components/schemas/RoomStatus'
         welcome:
           $ref: '#/components/schemas/WelcomeState'
+        stay:
+          $ref: '#/components/schemas/GuestStay'
         availableUnits:
           type: array
           minItems: 1
@@ -2157,6 +2979,59 @@ components:
           $ref: '#/components/schemas/RoomStatus'
         welcome:
           $ref: '#/components/schemas/WelcomeState'
+        stay:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/GuestStay'
+    TvUpdateManifest:
+      type: object
+      required:
+        [
+          enabled,
+          packageName,
+          latestVersionCode,
+          latestVersionName,
+          apkUrl,
+          sha256,
+          certificateSha256,
+          releaseId,
+          mandatory,
+          minSupportedVersionCode,
+        ]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the production self-update feed is active.
+        packageName:
+          type: string
+          enum: [com.roomservice.tv]
+        latestVersionCode:
+          type: integer
+          minimum: 0
+        latestVersionName:
+          type: string
+          nullable: true
+        apkUrl:
+          type: string
+          format: uri
+          nullable: true
+        sha256:
+          type: string
+          pattern: '^[0-9a-fA-F]{64}$'
+          nullable: true
+        certificateSha256:
+          type: string
+          pattern: '^[0-9a-fA-F]{64}$'
+          nullable: true
+        releaseId:
+          type: string
+        mandatory:
+          type: boolean
+        minSupportedVersionCode:
+          type: integer
+          minimum: 1
+          nullable: true
     StartTvProvisioningRequest:
       type: object
       required: [installationId, appVersion, deviceModel, androidApiLevel]
@@ -2324,6 +3199,367 @@ components:
         updatedAt:
           type: string
           format: date-time
+        categoryId:
+          type: string
+          format: uuid
+          nullable: true
+        category:
+          $ref: '#/components/schemas/BoutiqueCategory'
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoutiqueVariant'
+    BoutiqueVariantOption:
+      type: object
+      required: [code, label, value]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: '^[A-Za-z0-9_-]+$'
+        label:
+          $ref: '#/components/schemas/LocalizedText'
+        value:
+          $ref: '#/components/schemas/LocalizedText'
+    BoutiqueCategory:
+      type: object
+      required:
+        [
+          id,
+          localizedName,
+          localizedDescription,
+          imageMediaId,
+          active,
+          sortOrder,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        active:
+          type: boolean
+        sortOrder:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BoutiqueVariant:
+      type: object
+      required:
+        [
+          id,
+          menuItemId,
+          sku,
+          options,
+          price,
+          currency,
+          stockOnHand,
+          reservedQuantity,
+          availableQuantity,
+          active,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        menuItemId:
+          type: string
+          format: uuid
+        sku:
+          type: string
+          minLength: 1
+          maxLength: 80
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoutiqueVariantOption'
+        price:
+          type: number
+          format: double
+          minimum: 0
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        stockOnHand:
+          type: integer
+          minimum: 0
+        reservedQuantity:
+          type: integer
+          minimum: 0
+        availableQuantity:
+          type: integer
+          minimum: 0
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BoutiqueProduct:
+      type: object
+      required: [item, category, categoryId, variants]
+      properties:
+        item:
+          $ref: '#/components/schemas/MenuItem'
+        category:
+          $ref: '#/components/schemas/BoutiqueCategory'
+        categoryId:
+          type: string
+          format: uuid
+        variants:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/BoutiqueVariant'
+    CancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          nullable: true
+    CreateBoutiqueCategoryRequest:
+      type: object
+      required: [localizedName]
+      properties:
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        sortOrder:
+          type: integer
+          minimum: 0
+          default: 0
+    UpdateBoutiqueCategoryRequest:
+      type: object
+      minProperties: 1
+      properties:
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        sortOrder:
+          type: integer
+          minimum: 0
+    CreateBoutiqueVariantRequest:
+      type: object
+      required: [sku, options, price, currency, stockOnHand]
+      properties:
+        sku:
+          type: string
+          minLength: 1
+          maxLength: 80
+        options:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/BoutiqueVariantOption'
+        price:
+          type: number
+          format: double
+          minimum: 0
+        currency:
+          type: string
+          pattern: '^[A-Za-z]{3}$'
+        stockOnHand:
+          type: integer
+          minimum: 0
+        sortOrder:
+          type: integer
+          minimum: 0
+          default: 0
+    UpdateBoutiqueVariantRequest:
+      type: object
+      minProperties: 1
+      properties:
+        sku:
+          type: string
+          minLength: 1
+          maxLength: 80
+        options:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/BoutiqueVariantOption'
+        price:
+          type: number
+          format: double
+          minimum: 0
+        currency:
+          type: string
+          pattern: '^[A-Za-z]{3}$'
+        sortOrder:
+          type: integer
+          minimum: 0
+    CreateBoutiqueProductRequest:
+      type: object
+      required: [localizedName, categoryId, variants]
+      properties:
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        categoryId:
+          type: string
+          format: uuid
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        available:
+          type: boolean
+          default: true
+        sortOrder:
+          type: integer
+          minimum: 0
+          default: 0
+        variants:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreateBoutiqueVariantRequest'
+    UpdateBoutiqueProductRequest:
+      type: object
+      minProperties: 1
+      properties:
+        localizedName:
+          $ref: '#/components/schemas/LocalizedText'
+        localizedDescription:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/LocalizedDescription'
+        categoryId:
+          type: string
+          format: uuid
+        imageMediaId:
+          type: string
+          format: uuid
+          nullable: true
+        available:
+          type: boolean
+        sortOrder:
+          type: integer
+          minimum: 0
+    BoutiqueProductListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoutiqueProduct'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+    StockAdjustmentRequest:
+      type: object
+      required: [delta, reason]
+      properties:
+        delta:
+          type: integer
+          minimum: -1000000
+          maximum: 1000000
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+    StockMovement:
+      type: object
+      required: [id, variantId, type, quantity, reason, requestId, actorId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [ADJUSTMENT, RESERVE, RELEASE, FULFILL]
+        quantity:
+          type: integer
+        reason:
+          type: string
+        requestId:
+          type: string
+          format: uuid
+          nullable: true
+        actorId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    MediaUploadResponse:
+      type: object
+      required: [id, objectKey, contentType, fileName, byteSize, createdAt, url]
+      properties:
+        id:
+          type: string
+          format: uuid
+        objectKey:
+          type: string
+        contentType:
+          type: string
+        fileName:
+          type: string
+        byteSize:
+          type: integer
+          minimum: 1
+        url:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
     CreateGuestRequest:
       type: object
       required: [clientRequestId, items]
@@ -2342,6 +3578,18 @@ components:
           maxLength: 1000
           nullable: true
           description: Optional guest note retained with the request; it is not a payment note.
+    GuestRequestGroup:
+      type: object
+      required: [clientRequestId, requests]
+      properties:
+        clientRequestId:
+          type: string
+          format: uuid
+        requests:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/GuestRequest'
     CreateGuestRequestItem:
       type: object
       required: [menuItemId, quantity]
@@ -2353,6 +3601,11 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+        variantId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required when menuItemId belongs to Butik Indonesia.
         note:
           type: string
           maxLength: 500
@@ -2390,6 +3643,18 @@ components:
           minLength: 3
           maxLength: 3
           nullable: true
+        variantId:
+          type: string
+          format: uuid
+          nullable: true
+        sku:
+          type: string
+          nullable: true
+        variantOptions:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/BoutiqueVariantOption'
     StatusHistoryEntry:
       type: object
       required: [id, toStatus, changedAt]
@@ -2399,7 +3664,7 @@ components:
           format: uuid
         fromStatus:
           type: string
-          enum: [NEW, IN_PROCESS, COMPLETED]
+          enum: [NEW, IN_PROCESS, COMPLETED, CANCELLED]
           nullable: true
         toStatus:
           $ref: '#/components/schemas/RequestStatus'
@@ -2431,6 +3696,7 @@ components:
             - HOUSEKEEPING
             - BEAUTY_AND_SALON
             - CAFE
+            - BUTIK_INDONESIA
           nullable: true
     GuestRequest:
       type: object
@@ -2479,6 +3745,21 @@ components:
           type: string
           format: date-time
           nullable: true
+        reservationExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancellationReason:
+          type: string
+          nullable: true
+        cancellationSource:
+          type: string
+          enum: [STAFF, AUTO_EXPIRY]
+          nullable: true
         statusHistory:
           type: array
           items:
@@ -2493,13 +3774,16 @@ components:
       allOf:
         - $ref: '#/components/schemas/GuestRequest'
         - type: object
-          required: [room, guestAssignmentId]
+          required: [room, guestAssignmentId, guestName]
           properties:
             room:
               $ref: '#/components/schemas/RoomReference'
             guestAssignmentId:
               type: string
               format: uuid
+              nullable: true
+            guestName:
+              type: string
               nullable: true
     RoomManagerRequest:
       allOf:
@@ -2575,6 +3859,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MenuItem'
+        categories:
+          type: array
+          description: Active Butik Indonesia categories. Present only for the Butik Indonesia guest catalog.
+          items:
+            $ref: '#/components/schemas/BoutiqueCategory'
         page:
           type: integer
           minimum: 1
@@ -2728,7 +4017,7 @@ components:
           $ref: '#/components/schemas/StaffActor'
     ReceptionistRoom:
       type: object
-      required: [room, roomStatus, activeAssignment]
+      required: [room, roomStatus, activeAssignment, folioSummary]
       properties:
         room:
           $ref: '#/components/schemas/RoomReference'
@@ -2739,6 +4028,162 @@ components:
           allOf:
             - $ref: '#/components/schemas/GuestAssignment'
           nullable: true
+        folioSummary:
+          $ref: '#/components/schemas/ReceptionistFolioSummary'
+    ReceptionistFolioAmount:
+      type: object
+      required: [currency, amount]
+      properties:
+        currency:
+          type: string
+          minLength: 1
+        amount:
+          type: number
+          format: double
+    ReceptionistFolioStatusCounts:
+      type: object
+      required: [NEW, IN_PROCESS, COMPLETED, CANCELLED]
+      properties:
+        NEW:
+          type: integer
+          minimum: 0
+        IN_PROCESS:
+          type: integer
+          minimum: 0
+        COMPLETED:
+          type: integer
+          minimum: 0
+        CANCELLED:
+          type: integer
+          minimum: 0
+    ReceptionistFolioSummary:
+      type: object
+      required:
+        [
+          orderCount,
+          openOrderCount,
+          statusCounts,
+          itemCount,
+          totalsByCurrency,
+          unpricedItemCount,
+          isTotalComplete,
+          lastOrderAt,
+        ]
+      properties:
+        orderCount:
+          type: integer
+          minimum: 0
+        openOrderCount:
+          type: integer
+          minimum: 0
+        statusCounts:
+          $ref: '#/components/schemas/ReceptionistFolioStatusCounts'
+        itemCount:
+          type: integer
+          minimum: 0
+        totalsByCurrency:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceptionistFolioAmount'
+        unpricedItemCount:
+          type: integer
+          minimum: 0
+        isTotalComplete:
+          type: boolean
+        lastOrderAt:
+          type: string
+          format: date-time
+          nullable: true
+    ReceptionistFolioItem:
+      allOf:
+        - $ref: '#/components/schemas/RequestItem'
+        - type: object
+          required: [lineTotal]
+          properties:
+            lineTotal:
+              type: number
+              format: double
+              minimum: 0
+              nullable: true
+    ReceptionistFolioOrder:
+      allOf:
+        - $ref: '#/components/schemas/GuestRequest'
+        - type: object
+          required: [room, guestAssignmentId, guestName]
+          properties:
+            room:
+              $ref: '#/components/schemas/RoomReference'
+            guestAssignmentId:
+              type: string
+              format: uuid
+              nullable: true
+            guestName:
+              type: string
+              nullable: true
+            items:
+              type: array
+              minItems: 1
+              items:
+                $ref: '#/components/schemas/ReceptionistFolioItem'
+    ReceptionistFolioResponse:
+      type: object
+      required: [room, assignment, orders, summary, page, pageSize, total, lastUpdated]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        assignment:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/GuestAssignment'
+          nullable: true
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceptionistFolioOrder'
+        summary:
+          $ref: '#/components/schemas/ReceptionistFolioSummary'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        lastUpdated:
+          type: string
+          format: date-time
+    ReceptionistFolioHistoryItem:
+      type: object
+      required: [assignment, summary]
+      properties:
+        assignment:
+          $ref: '#/components/schemas/GuestAssignment'
+        summary:
+          $ref: '#/components/schemas/ReceptionistFolioSummary'
+    ReceptionistFolioHistoryResponse:
+      type: object
+      required: [room, items, page, pageSize, total, lastUpdated]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomReference'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceptionistFolioHistoryItem'
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        lastUpdated:
+          type: string
+          format: date-time
     ReceptionistRoomListResponse:
       type: object
       required: [items, page, pageSize, total]

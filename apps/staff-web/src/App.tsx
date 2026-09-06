@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 
 import hotelExteriorUrl from './assets/hotel-exterior.webp';
 import { CafeDashboard } from './CafeDashboard';
 import { CafeWorkspace, CatalogWorkspace } from './CafeWorkspace';
+import { ButikWorkspace } from './ButikWorkspace';
 import { OperationalDashboard } from './OperationalDashboard';
 import { ReceptionistWorkspace } from './ReceptionistWorkspace';
 import { SuperadminWorkspace } from './SuperadminWorkspace';
+import { StaffRealtimeProvider } from './StaffRealtime';
 import {
   DEFAULT_LANGUAGE,
   catalogUnitCopy,
@@ -29,6 +31,8 @@ type Screen =
   | 'admin-roles'
   | 'cafe-orders'
   | 'cafe-menu'
+  | 'butik-orders'
+  | 'butik-catalog'
   | 'receptionist-rooms'
   | 'spa-requests'
   | 'spa-menu'
@@ -57,6 +61,8 @@ function screenFromPath(pathname: string): Screen {
   if (pathname.includes('/admin/users')) return 'admin-users';
   if (pathname.includes('/cafe/orders')) return 'cafe-orders';
   if (pathname.includes('/cafe/menu')) return 'cafe-menu';
+  if (pathname.includes('/butik/catalog')) return 'butik-catalog';
+  if (pathname.includes('/butik/orders')) return 'butik-orders';
   if (pathname.includes('/receptionist/rooms')) return 'receptionist-rooms';
   if (pathname.includes('/spa/menu')) return 'spa-menu';
   if (pathname.includes('/spa/requests')) return 'spa-requests';
@@ -120,6 +126,7 @@ function operationalRoleForUser(user: StaffUser): OperationalRole | null {
 function landingScreenForUser(user: StaffUser): Screen {
   if (user.roles.includes('SUPERADMIN')) return 'admin-users';
   if (user.roles.includes('CAFE')) return 'cafe-orders';
+  if (user.roles.includes('BUTIK_INDONESIA')) return 'butik-orders';
   if (user.roles.includes('RECEPTIONIST')) return 'receptionist-rooms';
   const operationalRole = operationalRoleForUser(user);
   return operationalRole === null ? 'login' : screenForOperationalRole(operationalRole);
@@ -132,7 +139,12 @@ function canUserStayOnScreen(user: StaffUser, screen: Screen): boolean {
   if (user.roles.includes('CAFE')) {
     return screen === 'cafe-orders' || screen === 'cafe-menu';
   }
-  if (user.roles.includes('RECEPTIONIST')) return screen === 'receptionist-rooms';
+  if (user.roles.includes('BUTIK_INDONESIA')) {
+    return screen === 'butik-orders' || screen === 'butik-catalog';
+  }
+  if (user.roles.includes('RECEPTIONIST')) {
+    return screen === 'receptionist-rooms' || screen === 'housekeeping-requests';
+  }
   const operationalRole = operationalRoleForUser(user);
   if (operationalRole === null) return false;
   if (screen === screenForOperationalRole(operationalRole)) return true;
@@ -151,29 +163,33 @@ function pathForScreen(nextScreen: Screen): string {
           ? '/cafe/orders'
           : nextScreen === 'cafe-menu'
             ? '/cafe/menu'
-            : nextScreen === 'receptionist-rooms'
-              ? '/receptionist/rooms'
-              : nextScreen === 'spa-requests'
-                ? '/spa/requests'
-                : nextScreen === 'spa-menu'
-                  ? '/spa/menu'
-                  : nextScreen === 'restaurant-requests'
-                    ? '/restaurant/requests'
-                    : nextScreen === 'restaurant-menu'
-                      ? '/restaurant/menu'
-                      : nextScreen === 'lounge-requests'
-                        ? '/lounge/requests'
-                        : nextScreen === 'lounge-menu'
-                          ? '/lounge/menu'
-                          : nextScreen === 'beauty-and-salon-requests'
-                            ? '/beauty-and-salon/requests'
-                            : nextScreen === 'beauty-and-salon-menu'
-                              ? '/beauty-and-salon/menu'
-                              : nextScreen === 'housekeeping-requests'
-                                ? '/housekeeping/requests'
-                                : nextScreen === 'room-manager-requests'
-                                  ? '/room-manager/requests'
-                                  : '/';
+            : nextScreen === 'butik-orders'
+              ? '/butik/orders'
+              : nextScreen === 'butik-catalog'
+                ? '/butik/catalog'
+                : nextScreen === 'receptionist-rooms'
+                  ? '/receptionist/rooms'
+                  : nextScreen === 'spa-requests'
+                    ? '/spa/requests'
+                    : nextScreen === 'spa-menu'
+                      ? '/spa/menu'
+                      : nextScreen === 'restaurant-requests'
+                        ? '/restaurant/requests'
+                        : nextScreen === 'restaurant-menu'
+                          ? '/restaurant/menu'
+                          : nextScreen === 'lounge-requests'
+                            ? '/lounge/requests'
+                            : nextScreen === 'lounge-menu'
+                              ? '/lounge/menu'
+                              : nextScreen === 'beauty-and-salon-requests'
+                                ? '/beauty-and-salon/requests'
+                                : nextScreen === 'beauty-and-salon-menu'
+                                  ? '/beauty-and-salon/menu'
+                                  : nextScreen === 'housekeeping-requests'
+                                    ? '/housekeeping/requests'
+                                    : nextScreen === 'room-manager-requests'
+                                      ? '/room-manager/requests'
+                                      : '/';
 }
 
 function isValidEmail(email: string): boolean {
@@ -701,11 +717,15 @@ export function App() {
       ? copy.superadmin.pageTitle
       : signedInUser?.roles.includes('CAFE')
         ? copy.cafe.pageTitle
-        : signedInUser?.roles.includes('RECEPTIONIST')
-          ? copy.receptionist.pageTitle
-          : operationalRole === null
-            ? copy.pageTitle
-            : operationalText.pageTitle;
+        : signedInUser?.roles.includes('BUTIK_INDONESIA')
+          ? 'Butik Indonesia · Hadith Hotel'
+          : signedInUser?.roles.includes('RECEPTIONIST')
+            ? screen === 'housekeeping-requests'
+              ? operationalText.roles.HOUSEKEEPING.title
+              : copy.receptionist.pageTitle
+            : operationalRole === null
+              ? copy.pageTitle
+              : operationalText.pageTitle;
 
     try {
       window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
@@ -720,6 +740,7 @@ export function App() {
     language,
     operationalRole,
     operationalText.pageTitle,
+    operationalText.roles.HOUSEKEEPING.title,
     signedInUser,
   ]);
 
@@ -781,61 +802,67 @@ export function App() {
     }
   }
 
-  if (signedInUser?.roles.includes('SUPERADMIN')) {
-    return (
-      <SuperadminWorkspace
-        authCopy={copy}
-        initialPage={screen === 'admin-roles' ? 'roles' : 'users'}
-        language={language}
-        onLanguageChange={setLanguage}
-        onNavigate={(page) => navigate(page === 'roles' ? 'admin-roles' : 'admin-users')}
-        onSignOut={handleSignOut}
-        user={signedInUser}
-      />
-    );
-  }
+  function renderNonAdminWorkspace(user: StaffUser): ReactNode {
+    if (user.roles.includes('CAFE')) {
+      if (screen === 'cafe-menu') {
+        return (
+          <CafeWorkspace
+            authCopy={copy}
+            language={language}
+            onLanguageChange={setLanguage}
+            onNavigate={(page) => navigate(page === 'menu' ? 'cafe-menu' : 'cafe-orders')}
+            onSignOut={handleSignOut}
+            user={user}
+          />
+        );
+      }
 
-  if (signedInUser?.roles.includes('CAFE')) {
-    if (screen === 'cafe-menu') {
       return (
-        <CafeWorkspace
+        <CafeDashboard
           authCopy={copy}
           language={language}
           onLanguageChange={setLanguage}
           onNavigate={(page) => navigate(page === 'menu' ? 'cafe-menu' : 'cafe-orders')}
           onSignOut={handleSignOut}
-          user={signedInUser}
+          user={user}
         />
       );
     }
 
-    return (
-      <CafeDashboard
-        authCopy={copy}
-        language={language}
-        onLanguageChange={setLanguage}
-        onNavigate={(page) => navigate(page === 'menu' ? 'cafe-menu' : 'cafe-orders')}
-        onSignOut={handleSignOut}
-        user={signedInUser}
-      />
-    );
-  }
+    if (user.roles.includes('BUTIK_INDONESIA')) {
+      return (
+        <ButikWorkspace
+          authCopy={copy}
+          initialPage={screen === 'butik-catalog' ? 'catalog' : 'orders'}
+          language={language}
+          onLanguageChange={setLanguage}
+          onNavigate={(page) => navigate(page === 'catalog' ? 'butik-catalog' : 'butik-orders')}
+          onSignOut={handleSignOut}
+          user={user}
+        />
+      );
+    }
 
-  if (signedInUser?.roles.includes('RECEPTIONIST')) {
-    return (
-      <ReceptionistWorkspace
-        authCopy={copy}
-        language={language}
-        onLanguageChange={setLanguage}
-        onSignOut={handleSignOut}
-        user={signedInUser}
-      />
-    );
-  }
+    if (user.roles.includes('RECEPTIONIST')) {
+      return (
+        <ReceptionistWorkspace
+          activePage={screen === 'housekeeping-requests' ? 'housekeeping' : 'rooms'}
+          authCopy={copy}
+          language={language}
+          onLanguageChange={setLanguage}
+          onNavigateToRooms={() => navigate('receptionist-rooms')}
+          onNavigateToHousekeeping={() => navigate('housekeeping-requests')}
+          onSignOut={handleSignOut}
+          user={user}
+        />
+      );
+    }
 
-  if (signedInUser !== null && operationalRole !== null) {
-    const catalogUnit = catalogUnitForRole(operationalRole);
-    const catalogScreen = screenForCatalogRole(operationalRole);
+    const userOperationalRole = operationalRoleForUser(user);
+    if (userOperationalRole === null) return null;
+
+    const catalogUnit = catalogUnitForRole(userOperationalRole);
+    const catalogScreen = screenForCatalogRole(userOperationalRole);
     if (catalogUnit !== null && catalogScreen !== null && screen === catalogScreen) {
       return (
         <CatalogWorkspace
@@ -847,12 +874,14 @@ export function App() {
           language={language}
           onLanguageChange={setLanguage}
           onNavigate={(page) =>
-            navigate(page === 'menu' ? catalogScreen : screenForOperationalRole(operationalRole))
+            navigate(
+              page === 'menu' ? catalogScreen : screenForOperationalRole(userOperationalRole),
+            )
           }
           onSignOut={handleSignOut}
           unit={catalogUnit}
           unitCopy={catalogUnitCopy[language][catalogUnit]}
-          user={signedInUser}
+          user={user}
         />
       );
     }
@@ -867,13 +896,35 @@ export function App() {
             ? undefined
             : (page) =>
                 navigate(
-                  page === 'menu' ? catalogScreen : screenForOperationalRole(operationalRole),
+                  page === 'menu' ? catalogScreen : screenForOperationalRole(userOperationalRole),
                 )
         }
         onSignOut={handleSignOut}
-        role={operationalRole}
+        role={userOperationalRole}
+        user={user}
+      />
+    );
+  }
+
+  if (signedInUser?.roles.includes('SUPERADMIN')) {
+    return (
+      <SuperadminWorkspace
+        authCopy={copy}
+        initialPage={screen === 'admin-roles' ? 'roles' : 'users'}
+        language={language}
+        onLanguageChange={setLanguage}
+        onNavigate={(page) => navigate(page === 'roles' ? 'admin-roles' : 'admin-users')}
+        onSignOut={handleSignOut}
         user={signedInUser}
       />
+    );
+  }
+
+  if (signedInUser !== null) {
+    return (
+      <StaffRealtimeProvider user={signedInUser}>
+        {renderNonAdminWorkspace(signedInUser)}
+      </StaffRealtimeProvider>
     );
   }
 

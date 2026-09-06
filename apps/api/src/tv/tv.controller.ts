@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Post,
@@ -40,6 +41,12 @@ export class TvController {
   @Get('context')
   public getContext(@Headers('X-Device-Credential') credential: string | undefined) {
     return this.tvService.getContext(credential);
+  }
+
+  @Get('update-manifest')
+  @Header('Cache-Control', 'no-store')
+  public getUpdateManifest() {
+    return this.tvService.getUpdateManifest();
   }
 }
 

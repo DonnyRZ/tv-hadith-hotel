@@ -22,7 +22,9 @@ Role Receptionist digunakan untuk:
 - Mengakhiri assignment guest saat checkout.
 - Memastikan Smart TV kamar menampilkan personalized welcome message yang sesuai.
 
-Receptionist tidak digunakan untuk menangani operational request dari SPA, F&B, Housekeeping, Beauty & Salon, atau Cafe.
+Receptionist tidak digunakan untuk menangani operational request dari SPA, F&B,
+Beauty & Salon, atau Cafe. Sebagai scope tambahan, Receptionist dapat melihat
+dan memproses operational request Housekeeping melalui dashboard terpisah.
 
 ---
 
@@ -292,8 +294,8 @@ Receptionist dapat:
 
 Receptionist tidak dapat:
 
-- Confirm operational request.
-- Done operational request.
+- Confirm atau Done operational request dari SPA, F&B, Beauty & Salon, atau Cafe.
+- Melihat atau memproses request unit lain di luar Housekeeping.
 - Mengakses SPA operational dashboard.
 - Mengakses Restaurant operational dashboard.
 - Mengakses Lounge operational dashboard.

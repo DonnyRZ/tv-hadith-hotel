@@ -10,6 +10,7 @@ import {
   type GuestQrRoomStatus,
   type IssuedGuestQr,
   type ManagedTvDevice,
+  type StaffApiHealth,
 } from './management-api';
 import type { ReceptionistCopy } from './i18n';
 
@@ -32,14 +33,102 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-function operationError(error: unknown, copy: ReceptionistCopy): string {
+export function operationError(
+  error: unknown,
+  copy: ReceptionistCopy,
+  context: 'tv' | 'qr' = 'tv',
+): string {
   if (error instanceof StaffApiError) {
+    if (error.status === 0 || error.code === 'STAFF_API_UNREACHABLE') {
+      return copy.tvApiUnavailable;
+    }
+    if (error.status === 405 || error.code === 'STAFF_API_PROXY_MISSING') {
+      return copy.tvApiProxyMissing;
+    }
+    if (error.status === 502 || error.code === 'API_PROXY_UNAVAILABLE') {
+      return copy.tvApiUnavailable;
+    }
     if (error.status === 401 || error.code === 'UNAUTHORIZED') return copy.sessionExpired;
-    if (error.code === 'TV_ROOM_ALREADY_PAIRED') return copy.tvRoomAlreadyPaired;
-    if (error.code === 'PAIRING_CODE_EXPIRED') return copy.tvPairingExpired;
-    if (error.code === 'ROOM_NUMBER_MISMATCH') return copy.apiError;
+    if (error.status === 403 || error.code === 'FORBIDDEN') return copy.tvPermissionDenied;
+    if (context === 'tv') {
+      if (error.code === 'TV_ROOM_ALREADY_PAIRED') return copy.tvRoomAlreadyPaired;
+      if (error.code === 'PAIRING_CODE_EXPIRED') return copy.tvPairingExpired;
+      if (error.code === 'PAIRING_CODE_NOT_FOUND') return copy.tvPairingCodeNotFound;
+      if (error.code === 'PAIRING_CODE_ALREADY_USED') return copy.tvPairingAlreadyUsed;
+      if (error.code === 'ROOM_NUMBER_MISMATCH' || error.code === 'ROOM_NOT_FOUND') {
+        return copy.tvRoomMismatch;
+      }
+    }
   }
   return copy.apiError;
+}
+
+function setOperationFailure(
+  error: unknown,
+  copy: ReceptionistCopy,
+  context: 'tv' | 'qr',
+  setActionError: (message: string) => void,
+  setTechnicalError: (value: StaffApiError | null) => void,
+): void {
+  setActionError(operationError(error, copy, context));
+  setTechnicalError(error instanceof StaffApiError ? error : null);
+}
+
+function TechnicalDetails({
+  copy,
+  error,
+  health,
+}: {
+  copy: ReceptionistCopy;
+  error: StaffApiError | null;
+  health: StaffApiHealth | null;
+}) {
+  if (error === null && health === null) return null;
+
+  const valueOrFallback = (value: string | null | undefined): string =>
+    value === undefined || value === null || value.length === 0 ? copy.tvUnknownValue : value;
+
+  return (
+    <details className="receptionist-operation-details">
+      <summary>{copy.tvTechnicalDetails}</summary>
+      <dl>
+        <div>
+          <dt>{copy.tvHttpStatus}</dt>
+          <dd>
+            {error === null ? copy.tvUnknownValue : error.status === 0 ? 'Network' : error.status}
+          </dd>
+        </div>
+        <div>
+          <dt>{copy.tvErrorCode}</dt>
+          <dd>{valueOrFallback(error?.code)}</dd>
+        </div>
+        <div>
+          <dt>{copy.tvServerMessage}</dt>
+          <dd>{valueOrFallback(error?.message)}</dd>
+        </div>
+        <div>
+          <dt>{copy.tvRequestId}</dt>
+          <dd>{valueOrFallback(error?.requestId)}</dd>
+        </div>
+        <div>
+          <dt>{copy.tvEnvironment}</dt>
+          <dd>{valueOrFallback(error?.environment ?? health?.environment)}</dd>
+        </div>
+        <div>
+          <dt>{copy.tvReleaseId}</dt>
+          <dd>{valueOrFallback(error?.releaseId ?? health?.releaseId)}</dd>
+        </div>
+        <div>
+          <dt>{copy.tvApiEndpoint}</dt>
+          <dd>{valueOrFallback(error?.endpoint ?? '/health')}</dd>
+        </div>
+        <div>
+          <dt>{copy.tvApiMode}</dt>
+          <dd>{copy.tvApiModeSameOrigin}</dd>
+        </div>
+      </dl>
+    </details>
+  );
 }
 
 function tvStatusLabel(status: ManagedTvDevice['status'], copy: ReceptionistCopy): string {
@@ -118,6 +207,9 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
   const [issuedQr, setIssuedQr] = useState<IssuedGuestQr | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [actionError, setActionError] = useState('');
+  const [technicalError, setTechnicalError] = useState<StaffApiError | null>(null);
+  const [apiHealth, setApiHealth] = useState<StaffApiHealth | null>(null);
+  const [apiHealthError, setApiHealthError] = useState<StaffApiError | null>(null);
   const [feedback, setFeedback] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [tvAction, setTvAction] = useState<TvAction>(null);
@@ -144,13 +236,31 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
       setLoadState('ready');
     } catch (error) {
       setLoadState('error');
-      setActionError(operationError(error, copy));
+      setOperationFailure(error, copy, 'tv', setActionError, setTechnicalError);
     }
   }, [canManageQr, canPairTv, copy, room.id]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    let active = true;
+    void managementApi
+      .getApiHealth()
+      .then((health) => {
+        if (active) {
+          setApiHealth(health);
+          setApiHealthError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setApiHealthError(error instanceof StaffApiError ? error : null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function pollUntilTvClaims(): Promise<void> {
     for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -171,10 +281,12 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
     const normalizedCode = pairingCode.replace(/\D/g, '').slice(0, 6);
     if (normalizedCode.length !== 6) {
       setActionError(copy.tvPairingCodeInvalid);
+      setTechnicalError(null);
       return;
     }
     setTvAction('pair');
     setActionError('');
+    setTechnicalError(null);
     setFeedback('');
     try {
       await managementApi.pairTvDevice(normalizedCode, room.id, room.number);
@@ -183,7 +295,7 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
       await pollUntilTvClaims();
       setFeedback(copy.tvPairSuccess);
     } catch (error) {
-      setActionError(operationError(error, copy));
+      setOperationFailure(error, copy, 'tv', setActionError, setTechnicalError);
     } finally {
       setTvAction(null);
     }
@@ -193,13 +305,14 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
     if (tvDevice === null || !window.confirm(copy.tvResetConfirm)) return;
     setTvAction('reset');
     setActionError('');
+    setTechnicalError(null);
     setFeedback('');
     try {
       await managementApi.resetTvDevice(tvDevice.id);
       setTvDevice(null);
       setFeedback(copy.tvResetSuccess);
     } catch (error) {
-      setActionError(operationError(error, copy));
+      setOperationFailure(error, copy, 'tv', setActionError, setTechnicalError);
     } finally {
       setTvAction(null);
     }
@@ -209,13 +322,14 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
     if (tvDevice === null || !window.confirm(copy.tvRevokeConfirm)) return;
     setTvAction('revoke');
     setActionError('');
+    setTechnicalError(null);
     setFeedback('');
     try {
       await managementApi.revokeTvDevice(tvDevice.id);
       setTvDevice(null);
       setFeedback(copy.tvRevokeSuccess);
     } catch (error) {
-      setActionError(operationError(error, copy));
+      setOperationFailure(error, copy, 'tv', setActionError, setTechnicalError);
     } finally {
       setTvAction(null);
     }
@@ -225,6 +339,7 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
     if (qrStatus?.active && !window.confirm(copy.qrReissueConfirm)) return;
     setQrAction('issue');
     setActionError('');
+    setTechnicalError(null);
     setFeedback('');
     try {
       const issued = await managementApi.issueGuestQr(room.id);
@@ -232,7 +347,7 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
       setQrStatus({ room: issued.room, active: true, issuedAt: issued.issuedAt, revokedAt: null });
       setFeedback(copy.qrIssueSuccess);
     } catch (error) {
-      setActionError(operationError(error, copy));
+      setOperationFailure(error, copy, 'qr', setActionError, setTechnicalError);
     } finally {
       setQrAction(null);
     }
@@ -242,6 +357,7 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
     if (!window.confirm(copy.qrRevokeConfirm)) return;
     setQrAction('revoke');
     setActionError('');
+    setTechnicalError(null);
     setFeedback('');
     try {
       await managementApi.revokeGuestQr(room.id);
@@ -253,7 +369,7 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
       setIssuedQr(null);
       setFeedback(copy.qrRevokeSuccess);
     } catch (error) {
-      setActionError(operationError(error, copy));
+      setOperationFailure(error, copy, 'qr', setActionError, setTechnicalError);
     } finally {
       setQrAction(null);
     }
@@ -327,7 +443,10 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
                   maxLength={6}
                   onChange={(event) => {
                     setPairingCode(event.target.value.replace(/\D/g, '').slice(0, 6));
-                    if (actionError.length > 0) setActionError('');
+                    if (actionError.length > 0) {
+                      setActionError('');
+                      setTechnicalError(null);
+                    }
                   }}
                   placeholder={copy.tvPairingCodePlaceholder}
                   value={pairingCode}
@@ -341,6 +460,11 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
                 {tvAction === 'pair' ? copy.tvPairing : copy.tvPair}
               </button>
             </form>
+          )}
+          {apiHealthError !== null && (
+            <p className="admin-field-hint receptionist-api-health-warning">
+              {operationError(apiHealthError, copy, 'tv')}
+            </p>
           )}
         </section>
       )}
@@ -405,6 +529,12 @@ export function RoomOperations({ canManageQr, canPairTv, copy, room }: RoomOpera
           {actionError || feedback}
         </p>
       )}
+
+      <TechnicalDetails
+        copy={copy}
+        error={technicalError ?? apiHealthError}
+        health={technicalError === null && apiHealthError === null ? null : apiHealth}
+      />
 
       {issuedQr !== null &&
         createPortal(

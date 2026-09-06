@@ -154,4 +154,5 @@ export const INITIAL_MENU_SEEDS: Readonly<Record<UnitCode, readonly MenuSeedItem
   ]),
   BEAUTY_AND_SALON: localizeSeed(BEAUTY_AND_SALON_SERVICE_SEED),
   CAFE: localizeSeed(CAFE_MENU_SEED),
+  BUTIK_INDONESIA: [],
 };

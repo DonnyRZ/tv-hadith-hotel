@@ -19,6 +19,7 @@ enum class RequestStatus {
     NEW,
     IN_PROCESS,
     COMPLETED,
+    CANCELLED,
 }
 
 @Serializable
@@ -29,6 +30,7 @@ enum class UnitCode {
     HOUSEKEEPING,
     BEAUTY_AND_SALON,
     CAFE,
+    BUTIK_INDONESIA,
 }
 
 enum class TvLanguage(val tag: String) {
@@ -58,10 +60,33 @@ data class TvDevice(
 )
 
 @Serializable
+data class TvStay(
+    val checkInAt: String,
+    val checkOutAt: String,
+    val totalDays: Int,
+    val timeZone: String,
+)
+
+@Serializable
 data class TvContext(
     val device: TvDevice,
     val roomStatus: RoomStatus,
     val welcome: WelcomeState,
+    val stay: TvStay? = null,
+)
+
+@Serializable
+data class TvUpdateManifest(
+    val enabled: Boolean = false,
+    val packageName: String = "com.roomservice.tv",
+    val latestVersionCode: Int = 0,
+    val latestVersionName: String? = null,
+    val apkUrl: String? = null,
+    val sha256: String? = null,
+    val certificateSha256: String? = null,
+    val releaseId: String? = null,
+    val mandatory: Boolean = false,
+    val minSupportedVersionCode: Int? = null,
 )
 
 @Serializable
@@ -87,6 +112,42 @@ data class DepartmentListResponse(
 )
 
 @Serializable
+data class BoutiqueVariantOption(
+    val code: String,
+    val label: LocalizedText,
+    val value: LocalizedText,
+)
+
+@Serializable
+data class BoutiqueCategory(
+    val id: String,
+    val localizedName: LocalizedText,
+    val localizedDescription: LocalizedText? = null,
+    val imageMediaId: String? = null,
+    val active: Boolean = true,
+    val sortOrder: Int = 0,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class BoutiqueVariant(
+    val id: String,
+    val menuItemId: String,
+    val sku: String,
+    val options: List<BoutiqueVariantOption> = emptyList(),
+    val price: Double,
+    val currency: String,
+    val active: Boolean = true,
+    val availableQuantity: Int = 0,
+    val stockOnHand: Int? = null,
+    val reservedQuantity: Int? = null,
+    val sortOrder: Int = 0,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
 data class MenuItem(
     val id: String,
     val unit: UnitCode,
@@ -105,6 +166,9 @@ data class MenuItem(
     val sortOrder: Int = 0,
     val createdAt: String? = null,
     val updatedAt: String? = null,
+    val categoryId: String? = null,
+    val category: BoutiqueCategory? = null,
+    val variants: List<BoutiqueVariant> = emptyList(),
 )
 
 @Serializable
@@ -117,6 +181,7 @@ data class LocalizedText(
 @Serializable
 data class MenuItemListResponse(
     val items: List<MenuItem>,
+    val categories: List<BoutiqueCategory> = emptyList(),
     val page: Int = 1,
     val pageSize: Int = items.size,
     val total: Int = items.size,
@@ -131,6 +196,9 @@ data class RequestItem(
     val localizedName: LocalizedText? = null,
     val quantity: Int,
     val note: String? = null,
+    val variantId: String? = null,
+    val sku: String? = null,
+    val variantOptions: List<BoutiqueVariantOption>? = null,
 )
 
 @Serializable
@@ -144,6 +212,10 @@ data class GuestRequest(
     val requestedAt: String,
     val confirmedAt: String? = null,
     val completedAt: String? = null,
+    val reservationExpiresAt: String? = null,
+    val cancelledAt: String? = null,
+    val cancellationReason: String? = null,
+    val cancellationSource: String? = null,
 )
 
 @Serializable
@@ -155,10 +227,17 @@ data class GuestRequestListResponse(
 )
 
 @Serializable
+data class GuestRequestGroup(
+    val clientRequestId: String,
+    val requests: List<GuestRequest>,
+)
+
+@Serializable
 data class CreateGuestRequestItem(
     val menuItemId: String,
     val quantity: Int,
     val note: String? = null,
+    val variantId: String? = null,
 )
 
 @Serializable

@@ -57,6 +57,33 @@ describe('department request API', () => {
     });
   }
 
+  async function createHousekeepingRequest(roomNumber: string) {
+    return repository.create({
+      clientRequestId: randomUUID(),
+      department: 'HOUSEKEEPING',
+      unit: 'HOUSEKEEPING',
+      room: { id: randomUUID(), number: roomNumber },
+      items: [
+        {
+          menuItemId: randomUUID(),
+          unit: 'HOUSEKEEPING',
+          kind: 'SERVICE',
+          name: 'Extra towels',
+          localizedName: {
+            uz: 'Qo‘shimcha sochiqlar',
+            ru: 'Дополнительные полотенца',
+            en: 'Extra towels',
+          },
+          quantity: 2,
+          note: 'Please bring them before 8 PM.',
+          unitPrice: null,
+          currency: null,
+        },
+      ],
+      guestNote: 'The guest requested fresh towels.',
+    });
+  }
+
   async function createFoodAndBeverageRequest(
     unit: Extract<UnitCode, 'RESTAURANT' | 'LOUNGE'>,
     roomNumber: string,
@@ -167,7 +194,39 @@ describe('department request API', () => {
     await cafe.get(`/api/v1/department/requests/${restaurantRequest.id}`).expect(404);
 
     const receptionist = await login('receptionist@hadith-hotel.com', 'password');
-    await receptionist.get('/api/v1/department/requests').expect(403);
+    await receptionist.get('/api/v1/department/requests').query({ unit: 'SPA' }).expect(403);
+  });
+
+  it('lets Receptionist view and process only Housekeeping requests', async () => {
+    const receptionist = await login('receptionist@hadith-hotel.com', 'password');
+    const roomNumber = `hk-${randomUUID().slice(0, 8)}`;
+    const housekeepingRequest = await createHousekeepingRequest(roomNumber);
+
+    const queue = await receptionist
+      .get('/api/v1/department/requests')
+      .query({ unit: 'HOUSEKEEPING', room: roomNumber, page: 1, pageSize: 10 })
+      .expect(200);
+
+    expect(queue.body).toMatchObject({ page: 1, pageSize: 10, total: 1 });
+    expect(queue.body.items[0]).toMatchObject({
+      id: housekeepingRequest.id,
+      department: 'HOUSEKEEPING',
+      unit: 'HOUSEKEEPING',
+      room: { number: roomNumber },
+      guestNote: 'The guest requested fresh towels.',
+      status: 'NEW',
+    });
+    expect(queue.body.items[0].guestName).toBeNull();
+
+    const confirmed = await receptionist
+      .post(`/api/v1/department/requests/${housekeepingRequest.id}/confirm`)
+      .expect(200);
+    expect(confirmed.body).toMatchObject({ id: housekeepingRequest.id, status: 'IN_PROCESS' });
+
+    const completed = await receptionist
+      .post(`/api/v1/department/requests/${housekeepingRequest.id}/done`)
+      .expect(200);
+    expect(completed.body).toMatchObject({ id: housekeepingRequest.id, status: 'COMPLETED' });
   });
 
   it('allows each operational department role to view its own queue', async () => {
@@ -181,7 +240,7 @@ describe('department request API', () => {
       const department = await login(account.email, 'password');
       const response = await department
         .get('/api/v1/department/requests')
-        .query({ unit: account.unit, page: 1, pageSize: 10 })
+        .query({ unit: account.unit, status: 'NEW', page: 1, pageSize: 10 })
         .expect(200);
 
       expect(response.body).toMatchObject({ items: [], page: 1, pageSize: 10, total: 0 });

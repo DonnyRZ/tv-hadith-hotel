@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -174,6 +175,115 @@ describe('receptionist guest assignment API', () => {
       .expect(403);
   });
 
+  it('returns a read-only all-unit folio and isolates it from past and future assignments', async () => {
+    const receptionist = await login();
+    const roomNumber = '404';
+    const roomId = roomIdForNumber(roomNumber);
+    const qr = await receptionist
+      .post(`/api/v1/receptionist/rooms/${roomId}/guest-access-token`)
+      .expect(200);
+    const guestToken = new URL(qr.body.qrUrl as string).searchParams.get('access_token');
+    expect(guestToken).toEqual(expect.any(String));
+
+    const assigned = await receptionist
+      .post(`/api/v1/receptionist/rooms/${roomId}/guest-assignment`)
+      .send({ guestName: 'Folio Guest', stayDays: 3 })
+      .expect(201);
+    const assignmentId = assigned.body.id as string;
+
+    const cafeMenu = await request(app.getHttpServer())
+      .get('/api/v1/guest/menus')
+      .query({ unit: 'CAFE', page: 1, pageSize: 1 })
+      .set('X-Guest-Access-Token', guestToken as string)
+      .expect(200);
+    const restaurantMenu = await request(app.getHttpServer())
+      .get('/api/v1/guest/menus')
+      .query({ unit: 'RESTAURANT', page: 1, pageSize: 1 })
+      .set('X-Guest-Access-Token', guestToken as string)
+      .expect(200);
+
+    const cafeOrder = await request(app.getHttpServer())
+      .post('/api/v1/guest/requests')
+      .set('X-Guest-Access-Token', guestToken as string)
+      .send({
+        clientRequestId: randomUUID(),
+        items: [{ menuItemId: cafeMenu.body.items[0].id, quantity: 2 }],
+      })
+      .expect(201);
+    const restaurantOrder = await request(app.getHttpServer())
+      .post('/api/v1/guest/requests')
+      .set('X-Guest-Access-Token', guestToken as string)
+      .send({
+        clientRequestId: randomUUID(),
+        items: [{ menuItemId: restaurantMenu.body.items[0].id, quantity: 1 }],
+      })
+      .expect(201);
+
+    const folio = await receptionist
+      .get(`/api/v1/receptionist/rooms/${roomId}/folio`)
+      .expect(200);
+    expect(folio.body).toMatchObject({
+      room: { id: roomId, number: roomNumber },
+      assignment: { id: assignmentId, guestName: 'Folio Guest', status: 'ACTIVE' },
+      total: 2,
+      summary: {
+        orderCount: 2,
+        openOrderCount: 2,
+        itemCount: 3,
+        statusCounts: { NEW: 2, IN_PROCESS: 0, COMPLETED: 0, CANCELLED: 0 },
+      },
+    });
+    expect(folio.body.orders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: cafeOrder.body.id, unit: 'CAFE', guestAssignmentId: assignmentId }),
+        expect.objectContaining({ id: restaurantOrder.body.id, unit: 'RESTAURANT', guestAssignmentId: assignmentId }),
+      ]),
+    );
+
+    const cafe = request.agent(app.getHttpServer());
+    await cafe
+      .post('/api/v1/auth/staff/login')
+      .send({ email: 'cafe@hadith-hotel.com', password: 'password' })
+      .expect(200);
+    await cafe.get(`/api/v1/receptionist/rooms/${roomId}/folio`).expect(403);
+
+    await receptionist
+      .post(`/api/v1/receptionist/guest-assignments/${assignmentId}/checkout`)
+      .expect(200);
+    const history = await receptionist
+      .get(`/api/v1/receptionist/rooms/${roomId}/folio/history`)
+      .expect(200);
+    expect(history.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          assignment: expect.objectContaining({ id: assignmentId, guestName: 'Folio Guest' }),
+        }),
+      ]),
+    );
+    const historical = await receptionist
+      .get(`/api/v1/receptionist/rooms/${roomId}/folio/history/${assignmentId}`)
+      .expect(200);
+    expect(historical.body).toMatchObject({
+      assignment: { id: assignmentId, status: 'CHECKED_OUT' },
+      summary: { orderCount: 2 },
+    });
+
+    const reassigned = await receptionist
+      .post(`/api/v1/receptionist/rooms/${roomId}/guest-assignment`)
+      .send({ guestName: 'New Folio Guest', stayDays: 2 })
+      .expect(201);
+    const newFolio = await receptionist
+      .get(`/api/v1/receptionist/rooms/${roomId}/folio`)
+      .expect(200);
+    expect(reassigned.body.id).not.toBe(assignmentId);
+    expect(newFolio.body).toMatchObject({
+      assignment: { id: reassigned.body.id, guestName: 'New Folio Guest' },
+      orders: [],
+      total: 0,
+      summary: { orderCount: 0, itemCount: 0 },
+    });
+  });
+
   it('keeps the TV context authoritative after assignment and checkout', async () => {
     const receptionist = await login();
     const roomId = roomIdForNumber('403');
@@ -220,6 +330,12 @@ describe('receptionist guest assignment API', () => {
     expect(occupiedContext.body).toMatchObject({
       roomStatus: 'OCCUPIED',
       welcome: { guestName: 'TV Guest', personalized: true, message: 'Welcome, TV Guest' },
+      stay: {
+        checkInAt: expect.any(String),
+        checkOutAt: expect.any(String),
+        totalDays: 2,
+        timeZone: 'Asia/Tashkent',
+      },
     });
 
     await receptionist
@@ -232,6 +348,7 @@ describe('receptionist guest assignment API', () => {
     expect(afterCheckout.body).toMatchObject({
       roomStatus: 'VACANT',
       welcome: { guestName: null, personalized: false, message: 'Welcome' },
+      stay: null,
     });
   });
 });

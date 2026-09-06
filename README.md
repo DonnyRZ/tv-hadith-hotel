@@ -51,9 +51,9 @@ Product invariants currently locked:
 The package manifests use semver ranges while the generated pnpm lockfile is
 the install-time source of truth. The TV production distribution decision is
 documented in [`Docs/google-tv-distribution.md`](Docs/google-tv-distribution.md):
-one universal signed APK installed through controlled ADB/Wireless Debugging for
-114 internal hotel TVs. No Google Play Store, private app store, or Full
-Distribution registration is required for the current MVP.
+one universal signed APK with verified HTTPS self-update for 114 internal hotel
+TVs, with controlled USB as recovery fallback. No Google Play Store, private
+app store, or Full Distribution registration is required for the current MVP.
 
 ## Local setup
 
@@ -90,8 +90,25 @@ orders must not be configured in production. The existing database project is
 an external dependency and is not managed by this repository or by the
 `EBI-TV` Railway project.
 
+Mandatory operational references:
+
+- [`Docs/runtime-environment-contract.md`](Docs/runtime-environment-contract.md)
+- [`Docs/tv-pairing-runbook.md`](Docs/tv-pairing-runbook.md)
+- [`Docs/tv-pairing-troubleshooting.md`](Docs/tv-pairing-troubleshooting.md)
+- [`Docs/tv-release-checklist.md`](Docs/tv-release-checklist.md)
+- [`Docs/tv-apk-best-practices.md`](Docs/tv-apk-best-practices.md)
+- [`Docs/tv-self-update-research.md`](Docs/tv-self-update-research.md)
+- [`Docs/tv-self-update-runbook.md`](Docs/tv-self-update-runbook.md)
+- [`Docs/tv-release-automation.md`](Docs/tv-release-automation.md)
+- [`Docs/staff-realtime-runbook.md`](Docs/staff-realtime-runbook.md)
+
 The API can be started with `pnpm --filter @room-service/api dev` after copying
 `.env.example` to `.env`. Build the native TV APK from `apps/tv-shell` with
 `./gradlew.bat :app:assembleDebug` on Windows or `./gradlew :app:assembleDebug`
 on macOS/Linux. The TV installation and hardware gate are documented in
 `apps/tv-shell/README.md`.
+
+Production TV releases are built by the protected `EGI TV Release` GitHub
+Actions workflow from tags such as `tv-v0.4.8-code12`; see
+[`Docs/tv-release-automation.md`](Docs/tv-release-automation.md). The local
+custody wrapper is retained only as a recovery path.

@@ -14,12 +14,14 @@
     "dev": "pnpm -r --parallel --if-present run dev",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
+    "gallery:prepare": "node tools/prepare-guest-galleries.mjs",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
     "test:contract": "vitest run tests/contract",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "node tools/run-e2e.mjs",
     "test:e2e:list": "playwright test --list",
+    "verify:deployment": "node tools/verify-deployment.mjs",
     "typecheck": "pnpm -r --if-present run typecheck",
     "typecheck:config": "tsc --noEmit -p tsconfig.tools.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
@@ -27,16 +29,17 @@
     "infra:config": "docker compose config --quiet"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.49.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.1",
+    "@redocly/cli": "^2.49.0",
     "@types/node": "^26.4.0",
     "eslint": "^10.9.1",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.6",
+    "sharp": "0.34.5",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.68.0",
-    "yaml": "^2.9.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "yaml": "^2.9.0"
   }
 }

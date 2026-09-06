@@ -21,6 +21,7 @@ import {
   type Language,
   LANGUAGE_OPTIONS,
 } from './i18n';
+import { StaffRealtimeIndicator } from './StaffRealtime';
 
 interface StaffUser {
   displayName: string;
@@ -939,6 +940,7 @@ export function CatalogWorkspace({
             <strong>{copy.menu}</strong>
           </div>
           <div className="admin-topbar__actions">
+            <StaffRealtimeIndicator language={language} />
             <AdminLanguageSwitcher
               authCopy={authCopy}
               language={language}

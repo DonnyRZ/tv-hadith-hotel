@@ -23,6 +23,7 @@ const MENU_KIND_BY_UNIT: Readonly<Record<UnitCode, 'PRODUCT' | 'SERVICE'>> = {
   HOUSEKEEPING: 'SERVICE',
   BEAUTY_AND_SALON: 'SERVICE',
   CAFE: 'PRODUCT',
+  BUTIK_INDONESIA: 'PRODUCT',
 };
 
 @Injectable()
@@ -175,8 +176,13 @@ export class MenuService {
     }
 
     const roles = staff.roles.filter(isRoleCode);
-    const accessibleUnits = getAccessibleUnits(roles);
+    // Butik Indonesia has a separate catalog boundary because its products,
+    // variants, stock, and media must never be edited through the legacy flat
+    // menu CMS. Keeping this filter here also protects callers that invoke the
+    // old endpoint directly instead of using the dedicated CMS routes.
+    const accessibleUnits = getAccessibleUnits(roles).filter((unit) => unit !== 'BUTIK_INDONESIA');
     if (accessibleUnits.length === 0) throw this.unitForbidden();
+    if (requestedUnit === 'BUTIK_INDONESIA') throw this.unitForbidden();
     if (requestedUnit !== undefined && !accessibleUnits.includes(requestedUnit)) {
       throw this.unitForbidden();
     }

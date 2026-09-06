@@ -17,6 +17,7 @@ const context: TvContext = {
     guestName: 'Ahmad Fauzan',
     personalized: true,
   },
+  stay: null,
 };
 
 function socket(credential: string | undefined): Socket & {

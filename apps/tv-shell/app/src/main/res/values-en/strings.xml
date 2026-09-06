@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Hadith Hotel</string>
+    <string name="app_name">EGI TV</string>
     <string name="tv_loading_title">Loading</string>
     <string name="tv_loading_message">Preparing services for your room.</string>
     <string name="tv_pairing_title">Connect this TV</string>
@@ -14,9 +14,18 @@
     <string name="tv_error_pairing_expired">The pairing code expired. Preparing a new code.</string>
     <string name="tv_retry">Retry</string>
     <string name="tv_request_submitted">Request submitted.</string>
-    <string name="tv_request_unit_conflict">A request can contain items from one service only.</string>
+    <string name="tv_combined_request">Combined request</string>
     <string name="tv_brand">HADITH HOTEL</string>
-    <string name="tv_room">Room %1$s</string>
+    <string name="tv_room_label">ROOM</string>
+    <string name="tv_stay_check_in">CHECK-IN</string>
+    <string name="tv_stay_check_out">CHECK-OUT</string>
+    <string name="tv_stay_status">STAY</string>
+    <string name="tv_stay_days_remaining_one">%1$d day remaining</string>
+    <string name="tv_stay_days_remaining">%1$d days remaining</string>
+    <string name="tv_stay_checkout_today">Check-out today · %1$s</string>
+    <string name="tv_stay_total_days">%1$d-day stay</string>
+    <string name="tv_stay_ended">Stay period ended</string>
+    <string name="tv_stay_unavailable">Stay details unavailable</string>
     <string name="tv_home">Home</string>
     <string name="tv_my_requests">My requests</string>
     <string name="tv_cart">Selection (%1$d)</string>
@@ -26,6 +35,14 @@
     <string name="tv_service_unavailable">Available after a guest checks in.</string>
     <string name="tv_about">About hotel</string>
     <string name="tv_about_description">Hadith Hotel, comfort and thoughtful hospitality.</string>
+    <string name="tv_gallery_stay_description">A quiet look inside rooms and suites, shaped by light and warm detail.</string>
+    <string name="tv_gallery_taste_description">A considered selection from Saji Nusantara and 7Oz Espresso.</string>
+    <string name="tv_gallery_rest_description">Water, warmth, care and quiet moments designed for slowing down.</string>
+    <string name="tv_gallery_open">View full image</string>
+    <string name="tv_gallery_photo">%1$d / %2$d</string>
+    <string name="tv_gallery_saji">Saji Nusantara</string>
+    <string name="tv_gallery_7oz">7Oz Espresso</string>
+    <string name="tv_gallery_unavailable">This gallery is not available yet.</string>
     <string name="tv_destinations">Destinations</string>
     <string name="tv_destinations_description">Inspiring historic places around Samarkand.</string>
     <string name="tv_welcome_hotel">Welcome to Hadith Hotel</string>
@@ -37,12 +54,14 @@
     <string name="tv_cafe">7oz Espresso Cafe</string>
     <string name="tv_spa">SPA</string>
     <string name="tv_beauty_salon">Beauty Salon</string>
+    <string name="tv_butik_indonesia">Butik Indonesia</string>
     <string name="tv_explore">Explore</string>
     <string name="tv_unavailable">Currently unavailable</string>
     <string name="tv_saji_nusantara">Saji Nusantara</string>
     <string name="tv_lounge">Lounge</string>
     <string name="tv_fnb_description">A considered pause at Saji Nusantara and Lounge.</string>
     <string name="tv_menu_description">Choose a service from the available items.</string>
+    <string name="tv_all">All</string>
     <string name="tv_view_cart">View selection</string>
     <string name="tv_no_menu">There is no available menu for this service yet.</string>
     <string name="tv_menu_not_configured">This service is not configured yet.</string>
@@ -51,7 +70,13 @@
     <string name="tv_next">Next</string>
     <string name="tv_add">Add</string>
     <string name="tv_price_not_set">Price not set</string>
+    <string name="tv_select_variant">Select a variant</string>
+    <string name="tv_stock">Stock: %1$d</string>
+    <string name="tv_sku">SKU: %1$s</string>
+    <string name="tv_out_of_stock">Out of stock</string>
     <string name="tv_your_request">Your request</string>
+    <string name="tv_cart_description">Review your selection and send the request.</string>
+    <string name="tv_requests_description">Keep track of the requests you have sent.</string>
     <string name="tv_cart_empty">Your selection is empty.</string>
     <string name="tv_remove">Remove</string>
     <string name="tv_submitting">Submitting…</string>
@@ -60,6 +85,17 @@
     <string name="tv_status_new">New</string>
     <string name="tv_status_in_process">In progress</string>
     <string name="tv_status_completed">Completed</string>
+    <string name="tv_status_cancelled">Cancelled</string>
     <string name="tv_back">Back</string>
     <string name="tv_not_ready">Data is not ready yet.</string>
+    <string name="tv_update_brand">EGI TV</string>
+    <string name="tv_update_title">A new version is ready</string>
+    <string name="tv_update_ready_message">EGI TV %1$s has been downloaded and verified. Continue to install it.</string>
+    <string name="tv_update_permission_message">Allow EGI TV to install updates in Android settings, then return here.</string>
+    <string name="tv_update_failed">Update could not be prepared</string>
+    <string name="tv_update_failed_message">The update could not be prepared safely. Please try again.</string>
+    <string name="tv_update_install">Install update</string>
+    <string name="tv_update_open_settings">Open settings</string>
+    <string name="tv_update_retry">Try again</string>
+    <string name="tv_update_later">Later</string>
 </resources>

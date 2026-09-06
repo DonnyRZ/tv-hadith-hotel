@@ -10,12 +10,12 @@ Swagger Editor.
 |---|---|
 | Guest QR/mobile and Smart TV context | `/guest/context`, `/tv/context` |
 | Departments and active menus | `/guest/departments`, `/guest/menus` |
-| Guest request/order and status | `/guest/requests` |
+| Guest request/order and status | `/guest/requests`, `/guest/request-groups` |
 | Department dashboards | `/department/requests` |
 | Confirm and Done workflow | `/department/requests/{requestId}/confirm`, `/department/requests/{requestId}/done` |
 | Room Manager monitoring | `/room-manager/requests` |
 | Receptionist guest assignment and QR access | `/receptionist/rooms`, `/receptionist/guest-assignments`, `/receptionist/rooms/{roomId}/guest-access-token` |
-| Smart TV provisioning | `/tv/provisioning/start`, `/tv/provisioning/claim`, `/receptionist/tv-devices/pair`, `/receptionist/tv-devices/{deviceId}/revoke` |
+| Smart TV provisioning and self-update metadata | `/tv/provisioning/start`, `/tv/provisioning/claim`, `/tv/update-manifest`, `/receptionist/tv-devices/pair`, `/receptionist/tv-devices/{deviceId}/revoke` |
 | Menu/service management | `/management/menu-items` |
 | Staff session authentication | `/auth/staff/login`, `/auth/staff/logout`, `/auth/me` |
 | Superadmin staff management | `/management/users`, `/management/roles` |
@@ -34,6 +34,10 @@ Swagger Editor.
 - Smart TV realtime uses the `/realtime` namespace and the same
   `X-Device-Credential`; `guest.assignment.updated` is a refresh hint, not the
   authoritative state.
+- Smart TV self-update metadata is public and non-secret. `/tv/update-manifest`
+  never serves an APK or credential; it points to immutable HTTPS storage and
+  includes the exact package, version, SHA-256, and production certificate for
+  client-side verification.
 - Staff authentication uses the session cookie `room_service_session`; the
   server is responsible for Secure, HttpOnly, and SameSite attributes.
 - Staff authentication uses a unique email address as the login identifier.
@@ -64,12 +68,19 @@ Swagger Editor.
   services, 11 Housekeeping services, and 11 Beauty & Salon services. Lounge
   is returned as disabled with `MENU_NOT_CONFIGURED` until its menu is supplied.
 - Request unit is derived from the selected menu item. A guest cannot choose a
-  dashboard destination, and a request cannot mix items from different units.
+  dashboard destination. The legacy `/guest/requests` endpoint remains
+  single-unit for compatibility; the `/guest/request-groups` endpoint accepts
+  one combined cart and atomically creates one child request per unit.
+- A combined request keeps one `clientRequestId` across all child requests.
+  Guest clients render those children as one combined order, while each unit
+  dashboard receives only its own child request.
 - The only request transitions are `NEW → IN_PROCESS → COMPLETED`.
 - Room Manager endpoints are read-only and expose only SPA, Restaurant,
   Lounge, and Housekeeping.
 - Receptionist assignment exposes only `VACANT/OCCUPIED` room state and
-  `ACTIVE/CHECKED_OUT` assignment state; PMS integration is excluded.
+  `ACTIVE/CHECKED_OUT` assignment state; PMS integration is excluded. Receptionists
+  also have an operational Housekeeping queue and may confirm or complete only
+  Housekeeping requests.
 - Receptionist assignment requires the planned guest stay as a whole number of
   days from 1 to 365. Editing an active assignment may update this duration;
   checkout history retains the recorded value.

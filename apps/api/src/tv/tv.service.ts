@@ -2,11 +2,17 @@ import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { ApiException } from '../auth/api-exception';
+import { runtimeReleaseId, TV_UPDATE_PACKAGE_NAME } from '../config/runtime-config';
+import { toGuestStay } from '../guest/guest-stay';
 import { RECEPTIONIST_REPOSITORY } from '../receptionist/receptionist.repository';
 import type { ReceptionistRepository } from '../receptionist/receptionist.repository';
 import { TV_DEVICE_REPOSITORY } from './tv-device.repository';
 import {
+  TvDevicePairingAlreadyUsedError,
+  TvDevicePairingCodeChangedError,
+  TvDevicePairingExpiredError,
   TvDeviceRoomConflictError,
+  TvDeviceRoomNumberMismatchError,
   TvDeviceRoomNotFoundError,
   type TvDeviceRepository,
 } from './tv-device.repository';
@@ -19,6 +25,7 @@ import type {
   TvDeviceAdminView,
   TvDevicePublic,
   TvDeviceRecord,
+  TvUpdateManifest,
 } from './tv.types';
 
 interface RateLimitRecord {
@@ -60,7 +67,25 @@ export class TvService {
     try {
       paired = await this.repository.pair(record.id, input, pairedAt);
     } catch (error) {
+      if (error instanceof TvDevicePairingExpiredError) {
+        throw this.pairingExpired();
+      }
+      if (error instanceof TvDevicePairingAlreadyUsedError) {
+        throw new ApiException(HttpStatus.CONFLICT, {
+          code: 'PAIRING_CODE_ALREADY_USED',
+          message: 'The TV pairing code has already been used.',
+        });
+      }
+      if (error instanceof TvDevicePairingCodeChangedError) {
+        throw this.pairingNotFound();
+      }
       if (error instanceof TvDeviceRoomNotFoundError) throw this.roomNotFound();
+      if (error instanceof TvDeviceRoomNumberMismatchError) {
+        throw new ApiException(HttpStatus.CONFLICT, {
+          code: 'ROOM_NUMBER_MISMATCH',
+          message: 'The selected room ID and room number do not match.',
+        });
+      }
       if (error instanceof TvDeviceRoomConflictError) {
         throw new ApiException(HttpStatus.CONFLICT, {
           code: 'TV_ROOM_ALREADY_PAIRED',
@@ -143,6 +168,53 @@ export class TvService {
         guestName,
         personalized: guestName !== null,
       },
+      stay: activeAssignment === null ? null : toGuestStay(activeAssignment),
+    };
+  }
+
+  /**
+   * Public, non-secret release metadata for the TV self-update client.
+   *
+   * The API container deliberately never serves the APK itself. The URL points
+   * to immutable HTTPS storage/CDN and the TV verifies both the file digest and
+   * signing certificate before opening Android's package installer.
+   */
+  public getUpdateManifest(): TvUpdateManifest {
+    const enabled = this.readBoolean('TV_UPDATE_ENABLED', false);
+    if (!enabled) {
+      return {
+        enabled: false,
+        packageName: TV_UPDATE_PACKAGE_NAME,
+        latestVersionCode: 0,
+        latestVersionName: null,
+        apkUrl: null,
+        sha256: null,
+        certificateSha256: null,
+        releaseId: runtimeReleaseId(this.config),
+        mandatory: false,
+        minSupportedVersionCode: null,
+      };
+    }
+
+    const configuredMinimum = this.config
+      .get<string>('TV_UPDATE_MIN_SUPPORTED_VERSION_CODE')
+      ?.trim();
+    return {
+      enabled: true,
+      packageName: TV_UPDATE_PACKAGE_NAME,
+      latestVersionCode: Number(this.config.get<string>('TV_UPDATE_VERSION_CODE')),
+      latestVersionName: this.config.get<string>('TV_UPDATE_VERSION_NAME')?.trim() ?? null,
+      apkUrl: this.config.get<string>('TV_UPDATE_APK_URL')?.trim() ?? null,
+      sha256: this.config.get<string>('TV_UPDATE_SHA256')?.trim().toLowerCase() ?? null,
+      certificateSha256:
+        this.config.get<string>('TV_UPDATE_CERTIFICATE_SHA256')?.trim().toLowerCase() ?? null,
+      releaseId:
+        this.config.get<string>('TV_UPDATE_RELEASE_ID')?.trim() || runtimeReleaseId(this.config),
+      mandatory: this.readBoolean('TV_UPDATE_MANDATORY', false),
+      minSupportedVersionCode:
+        configuredMinimum === undefined || configuredMinimum.length === 0
+          ? null
+          : Number(configuredMinimum),
     };
   }
 
@@ -198,11 +270,22 @@ export class TvService {
 
   private assertNotExpired(record: TvDeviceRecord): void {
     if (Date.parse(record.pairingExpiresAt) <= Date.now()) {
-      throw new ApiException(HttpStatus.GONE, {
-        code: 'PAIRING_CODE_EXPIRED',
-        message: 'The TV pairing code has expired. Start a new pairing session.',
-      });
+      throw this.pairingExpired();
     }
+  }
+
+  private pairingExpired(): ApiException {
+    return new ApiException(HttpStatus.GONE, {
+      code: 'PAIRING_CODE_EXPIRED',
+      message: 'The TV pairing code has expired. Start a new pairing session.',
+    });
+  }
+
+  private pairingNotFound(): ApiException {
+    return new ApiException(HttpStatus.NOT_FOUND, {
+      code: 'PAIRING_CODE_NOT_FOUND',
+      message: 'The TV pairing code is invalid or no longer available.',
+    });
   }
 
   private assertRateLimit(key: string): void {
@@ -228,6 +311,16 @@ export class TvService {
     return Number.isInteger(configured) && configured >= 60 && configured <= 3600
       ? configured
       : 600;
+  }
+
+  private readBoolean(name: string, fallback: boolean): boolean {
+    const configured = this.config.get<string>(name)?.trim();
+    if (configured === undefined || configured.length === 0) return fallback;
+    return (
+      configured === '1' ||
+      configured.toLowerCase() === 'true' ||
+      configured.toLowerCase() === 'yes'
+    );
   }
 
   private toPublicDevice(record: TvDeviceRecord): TvDevicePublic {

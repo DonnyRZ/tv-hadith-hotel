@@ -7,7 +7,11 @@ import { Pool, type PoolClient } from 'pg';
 import { RECEPTIONIST_ROOM_CATALOG } from '../receptionist/receptionist.types';
 import { hashTvSecret } from './in-memory-tv-device.repository';
 import {
+  TvDevicePairingAlreadyUsedError,
+  TvDevicePairingCodeChangedError,
+  TvDevicePairingExpiredError,
   TvDeviceRoomConflictError,
+  TvDeviceRoomNumberMismatchError,
   TvDeviceRoomNotFoundError,
   type TvDeviceRepository,
 } from './tv-device.repository';
@@ -244,7 +248,13 @@ export class PostgresTvDeviceRepository implements TvDeviceRepository, OnModuleD
       const current = currentResult.rows[0];
       if (current === undefined) throw new NotFoundException('TV device does not exist.');
       if (current.status !== 'PENDING') {
-        throw new ConflictException('TV pairing code has already been used.');
+        throw new TvDevicePairingAlreadyUsedError();
+      }
+      if (current.pairing_code_hash !== hashTvSecret(input.pairingCode)) {
+        throw new TvDevicePairingCodeChangedError();
+      }
+      if (new Date(current.pairing_expires_at).getTime() <= Date.now()) {
+        throw new TvDevicePairingExpiredError();
       }
 
       const roomResult = await client.query<{ id: string; room_number: string }>(
@@ -253,7 +263,7 @@ export class PostgresTvDeviceRepository implements TvDeviceRepository, OnModuleD
       );
       const room = roomResult.rows[0];
       if (room === undefined) throw new TvDeviceRoomNotFoundError();
-      if (room.room_number !== input.roomNumber) throw new TvDeviceRoomNotFoundError();
+      if (room.room_number !== input.roomNumber) throw new TvDeviceRoomNumberMismatchError();
 
       const activeDeviceResult = await client.query<{ id: string }>(
         `

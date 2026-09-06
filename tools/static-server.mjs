@@ -2,7 +2,9 @@
 
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { createServer, request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -32,6 +34,7 @@ const contentTypes = {
   '.woff2': 'font/woff2',
 };
 
+const requireApiProxy = readBoolean(process.env.REQUIRE_API_PROXY);
 const proxyTarget = readProxyTarget();
 const proxyBodyLimit = 2 * 1024 * 1024;
 const hopByHopHeaders = new Set([
@@ -48,6 +51,9 @@ const hopByHopHeaders = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
+
+const requestIdHeader = 'X-Request-Id';
+const safeRequestId = /^[A-Za-z0-9._:-]{1,128}$/u;
 
 function readProxyTarget() {
   const configuredTarget = process.env.API_PROXY_TARGET?.trim();
@@ -67,14 +73,33 @@ function readProxyTarget() {
     throw new Error('API_PROXY_TARGET must not contain credentials or a query string');
   }
 
-  target.pathname = target.pathname.replace(/\/+$/u, '');
+  const targetBasePath = target.pathname.replace(/\/+$/u, '');
+  if (requireApiProxy && targetBasePath.length > 0) {
+    throw new Error(
+      'API_PROXY_TARGET must be an API origin without a path when proxying is required',
+    );
+  }
+  target.pathname = targetBasePath || '/';
   return target;
+}
+
+function readBoolean(value) {
+  return value === '1' || value?.toLowerCase() === 'true' || value?.toLowerCase() === 'yes';
+}
+
+if (requireApiProxy && proxyTarget === null) {
+  throw new Error('API_PROXY_TARGET is required when REQUIRE_API_PROXY is enabled');
 }
 
 function shouldProxy(requestUrl) {
   if (proxyTarget === null) return false;
   const url = new URL(requestUrl, 'http://static-server.local');
-  return url.pathname.startsWith('/api/');
+  return (
+    url.pathname.startsWith('/api/') ||
+    url.pathname === '/api' ||
+    url.pathname === '/socket.io' ||
+    url.pathname.startsWith('/socket.io/')
+  );
 }
 
 function proxyUrl(requestUrl) {
@@ -101,6 +126,12 @@ function proxyRequestHeaders(request) {
       : (forwardedProtocol ?? (proxyTarget.protocol === 'https:' ? 'https' : 'http')),
   );
   return headers;
+}
+
+function requestIdFor(request) {
+  const incoming = request.headers[requestIdHeader.toLowerCase()];
+  const value = Array.isArray(incoming) ? incoming[0] : incoming;
+  return value !== undefined && safeRequestId.test(value.trim()) ? value.trim() : randomUUID();
 }
 
 async function readProxyBody(request) {
@@ -139,12 +170,23 @@ function responseHeadersFromProxy(upstream, bodyLength) {
 async function proxyApiRequest(request, response) {
   const target = proxyUrl(request.url ?? '/');
   const method = request.method ?? 'GET';
+  const requestId = requestIdFor(request);
   const hasBody = method !== 'GET' && method !== 'HEAD';
   const body = hasBody ? await readProxyBody(request) : undefined;
 
   if (body === null) {
-    response.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' });
-    response.end('Payload Too Large');
+    response.writeHead(413, {
+      'Content-Type': 'application/json; charset=utf-8',
+      [requestIdHeader]: requestId,
+    });
+    response.end(
+      JSON.stringify({
+        statusCode: 413,
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Payload Too Large',
+        requestId,
+      }),
+    );
     return;
   }
 
@@ -156,22 +198,86 @@ async function proxyApiRequest(request, response) {
       redirect: 'manual',
     });
     const responseBody = Buffer.from(await upstream.arrayBuffer());
-    response.writeHead(upstream.status, responseHeadersFromProxy(upstream, responseBody.length));
+    response.writeHead(upstream.status, {
+      ...responseHeadersFromProxy(upstream, responseBody.length),
+      [requestIdHeader]: upstream.headers.get(requestIdHeader) ?? requestId,
+    });
     if (method === 'HEAD') {
       response.end();
       return;
     }
     response.end(responseBody);
   } catch {
-    response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+    response.writeHead(502, {
+      'Content-Type': 'application/json; charset=utf-8',
+      [requestIdHeader]: requestId,
+    });
     response.end(
       JSON.stringify({
         statusCode: 502,
         code: 'API_PROXY_UNAVAILABLE',
         message: 'The API is temporarily unavailable.',
+        requestId,
+        environment: process.env.APP_ENVIRONMENT ?? process.env.NODE_ENV ?? 'production',
+        releaseId: process.env.RELEASE_ID ?? 'unknown',
       }),
     );
   }
+}
+
+function proxyUpgradeHeaders(request, target) {
+  const headers = { ...request.headers };
+  headers.host = target.host;
+  headers['x-forwarded-proto'] =
+    request.headers['x-forwarded-proto'] ?? (target.protocol === 'https:' ? 'https' : 'http');
+  if (request.headers.host !== undefined) headers['x-forwarded-host'] = request.headers.host;
+  return headers;
+}
+
+function writeUpgradeResponse(socket, response) {
+  const statusMessage = response.statusMessage ?? '';
+  const lines = [`HTTP/${response.httpVersion} ${response.statusCode} ${statusMessage}`];
+  for (let index = 0; index < response.rawHeaders.length; index += 2) {
+    lines.push(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}`);
+  }
+  socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+}
+
+function proxyWebSocketUpgrade(request, clientSocket, head) {
+  if (proxyTarget === null) {
+    clientSocket.destroy();
+    return;
+  }
+
+  const target = proxyUrl(request.url ?? '/');
+  const requestClient = target.protocol === 'https:' ? httpsRequest : httpRequest;
+  const upstreamRequest = requestClient({
+    hostname: target.hostname,
+    path: `${target.pathname}${target.search}`,
+    port: target.port === '' ? undefined : Number(target.port),
+    headers: proxyUpgradeHeaders(request, target),
+    method: 'GET',
+  });
+
+  upstreamRequest.once('upgrade', (upstreamResponse, upstreamSocket, upstreamHead) => {
+    writeUpgradeResponse(clientSocket, upstreamResponse);
+    if (upstreamHead.length > 0) upstreamSocket.write(upstreamHead);
+    if (head.length > 0) upstreamSocket.write(head);
+
+    clientSocket.pipe(upstreamSocket);
+    upstreamSocket.pipe(clientSocket);
+    clientSocket.once('close', () => upstreamSocket.destroy());
+    upstreamSocket.once('close', () => clientSocket.destroy());
+  });
+
+  upstreamRequest.once('response', (upstreamResponse) => {
+    writeUpgradeResponse(clientSocket, upstreamResponse);
+    upstreamResponse.pipe(clientSocket);
+  });
+
+  upstreamRequest.once('error', () => clientSocket.destroy());
+  clientSocket.once('error', () => upstreamRequest.destroy());
+  upstreamRequest.end();
 }
 
 function resolveInsideRoot(relativePath) {
@@ -352,11 +458,20 @@ const server = createServer(async (request, response) => {
   await pipeline(createReadStream(filePath), response);
 });
 
+server.on('upgrade', (request, socket, head) => {
+  if (!shouldProxy(request.url ?? '/')) {
+    socket.destroy();
+    return;
+  }
+  proxyWebSocketUpgrade(request, socket, head);
+});
+
 server.listen(port, '0.0.0.0', () => {
   console.log(`Static server listening on 0.0.0.0:${port}`);
 });
 
 function shutdown() {
+  server.closeAllConnections?.();
   server.close(() => process.exit(0));
 }
 

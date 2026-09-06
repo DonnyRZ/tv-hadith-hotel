@@ -29,6 +29,7 @@ export interface MenuRepository {
   listItems(filter: MenuItemListFilter): Promise<MenuItemListResult>;
   findItemById(id: string): Promise<MenuItemRecord | null>;
   createItem(input: CreateMenuItemRecordInput): Promise<MenuItemRecord>;
+  deleteItem(id: string): Promise<boolean>;
   updateItem(id: string, input: UpdateMenuItemRecordInput): Promise<MenuItemRecord | null>;
   setItemActive(id: string, active: boolean): Promise<MenuItemRecord | null>;
 }
@@ -49,6 +50,15 @@ function normalizedName(value: string): string {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === '23505'
+  );
 }
 
 function cloneItem(item: MenuItemRecord): MenuItemRecord {
@@ -126,6 +136,10 @@ export class InMemoryMenuRepository implements MenuRepository {
     };
     this.items.set(item.id, item);
     return cloneItem(item);
+  }
+
+  public async deleteItem(id: string): Promise<boolean> {
+    return this.items.delete(id);
   }
 
   public async updateItem(
@@ -312,42 +326,53 @@ export class PostgresMenuRepository implements MenuRepository, OnModuleDestroy {
 
   public async createItem(input: CreateMenuItemRecordInput): Promise<MenuItemRecord> {
     await this.ensureInitialized();
-    const result = await this.pool.query<MenuItemRow>(
-      `
-        INSERT INTO menu_items
-          (id, unit, kind, name, name_uz, name_ru, name_en,
-           description, description_uz, description_ru, description_en,
-           price, currency, duration_minutes,
-           image_media_id, active, available, quantity_allowed, sort_order)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true, $16, $17, $18)
-        RETURNING id, unit, kind, name, name_uz, name_ru, name_en,
-                  description, description_uz, description_ru, description_en,
-                  price, currency, duration_minutes,
-                  image_media_id, active, available, quantity_allowed, sort_order,
-                  created_at, updated_at
-      `,
-      [
-        randomUUID(),
-        input.unit,
-        input.kind,
-        input.localizedName.uz.trim(),
-        input.localizedName.uz.trim(),
-        input.localizedName.ru.trim(),
-        input.localizedName.en.trim(),
-        input.localizedDescription?.uz ?? null,
-        input.localizedDescription?.uz ?? null,
-        input.localizedDescription?.ru ?? null,
-        input.localizedDescription?.en ?? null,
-        input.price,
-        input.currency,
-        input.durationMinutes,
-        input.imageMediaId,
-        input.available,
-        input.quantityAllowed,
-        input.sortOrder,
-      ],
-    );
-    return this.toItem(result.rows[0] as MenuItemRow);
+    try {
+      const result = await this.pool.query<MenuItemRow>(
+        `
+          INSERT INTO menu_items
+            (id, unit, kind, name, name_uz, name_ru, name_en,
+             description, description_uz, description_ru, description_en,
+             price, currency, duration_minutes,
+             image_media_id, active, available, quantity_allowed, sort_order)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true, $16, $17, $18)
+          RETURNING id, unit, kind, name, name_uz, name_ru, name_en,
+                    description, description_uz, description_ru, description_en,
+                    price, currency, duration_minutes,
+                    image_media_id, active, available, quantity_allowed, sort_order,
+                    created_at, updated_at
+        `,
+        [
+          randomUUID(),
+          input.unit,
+          input.kind,
+          input.localizedName.uz.trim(),
+          input.localizedName.uz.trim(),
+          input.localizedName.ru.trim(),
+          input.localizedName.en.trim(),
+          input.localizedDescription?.uz ?? null,
+          input.localizedDescription?.uz ?? null,
+          input.localizedDescription?.ru ?? null,
+          input.localizedDescription?.en ?? null,
+          input.price,
+          input.currency,
+          input.durationMinutes,
+          input.imageMediaId,
+          input.available,
+          input.quantityAllowed,
+          input.sortOrder,
+        ],
+      );
+      return this.toItem(result.rows[0] as MenuItemRow);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new MenuItemNameConflictError();
+      throw error;
+    }
+  }
+
+  public async deleteItem(id: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const result = await this.pool.query('DELETE FROM menu_items WHERE id::text = $1', [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   public async updateItem(
@@ -357,62 +382,67 @@ export class PostgresMenuRepository implements MenuRepository, OnModuleDestroy {
     await this.ensureInitialized();
     const current = await this.findItemById(id);
     if (current === null) return null;
-    const result = await this.pool.query<MenuItemRow>(
-      `
-        UPDATE menu_items
-        SET name = $2,
-            name_uz = $3,
-            name_ru = $4,
-            name_en = $5,
-            description = $6,
-            description_uz = $7,
-            description_ru = $8,
-            description_en = $9,
-            price = $10,
-            currency = $11,
-            duration_minutes = $12,
-            image_media_id = $13,
-            active = $14,
-            available = $15,
-            quantity_allowed = $16,
-            sort_order = $17,
-            updated_at = now()
-        WHERE id::text = $1
-        RETURNING id, unit, kind, name, name_uz, name_ru, name_en,
-                  description, description_uz, description_ru, description_en,
-                  price, currency, duration_minutes,
-                  image_media_id, active, available, quantity_allowed, sort_order,
-                  created_at, updated_at
-      `,
-      [
-        id,
-        input.localizedName?.uz.trim() ?? current.name,
-        input.localizedName?.uz.trim() ?? current.localizedName.uz,
-        input.localizedName?.ru.trim() ?? current.localizedName.ru,
-        input.localizedName?.en.trim() ?? current.localizedName.en,
-        input.localizedDescription === undefined
-          ? current.description
-          : (input.localizedDescription?.uz ?? null),
-        input.localizedDescription === undefined
-          ? (current.localizedDescription?.uz ?? current.description)
-          : (input.localizedDescription?.uz ?? null),
-        input.localizedDescription === undefined
-          ? (current.localizedDescription?.ru ?? current.description)
-          : (input.localizedDescription?.ru ?? null),
-        input.localizedDescription === undefined
-          ? (current.localizedDescription?.en ?? current.description)
-          : (input.localizedDescription?.en ?? null),
-        input.price === undefined ? current.price : input.price,
-        input.currency === undefined ? current.currency : input.currency,
-        input.durationMinutes === undefined ? current.durationMinutes : input.durationMinutes,
-        input.imageMediaId === undefined ? current.imageMediaId : input.imageMediaId,
-        input.active ?? current.active,
-        input.available ?? current.available,
-        input.quantityAllowed ?? current.quantityAllowed,
-        input.sortOrder ?? current.sortOrder,
-      ],
-    );
-    return result.rows[0] === undefined ? null : this.toItem(result.rows[0]);
+    try {
+      const result = await this.pool.query<MenuItemRow>(
+        `
+          UPDATE menu_items
+          SET name = $2,
+              name_uz = $3,
+              name_ru = $4,
+              name_en = $5,
+              description = $6,
+              description_uz = $7,
+              description_ru = $8,
+              description_en = $9,
+              price = $10,
+              currency = $11,
+              duration_minutes = $12,
+              image_media_id = $13,
+              active = $14,
+              available = $15,
+              quantity_allowed = $16,
+              sort_order = $17,
+              updated_at = now()
+          WHERE id::text = $1
+          RETURNING id, unit, kind, name, name_uz, name_ru, name_en,
+                    description, description_uz, description_ru, description_en,
+                    price, currency, duration_minutes,
+                    image_media_id, active, available, quantity_allowed, sort_order,
+                    created_at, updated_at
+        `,
+        [
+          id,
+          input.localizedName?.uz.trim() ?? current.name,
+          input.localizedName?.uz.trim() ?? current.localizedName.uz,
+          input.localizedName?.ru.trim() ?? current.localizedName.ru,
+          input.localizedName?.en.trim() ?? current.localizedName.en,
+          input.localizedDescription === undefined
+            ? current.description
+            : (input.localizedDescription?.uz ?? null),
+          input.localizedDescription === undefined
+            ? (current.localizedDescription?.uz ?? current.description)
+            : (input.localizedDescription?.uz ?? null),
+          input.localizedDescription === undefined
+            ? (current.localizedDescription?.ru ?? current.description)
+            : (input.localizedDescription?.ru ?? null),
+          input.localizedDescription === undefined
+            ? (current.localizedDescription?.en ?? current.description)
+            : (input.localizedDescription?.en ?? null),
+          input.price === undefined ? current.price : input.price,
+          input.currency === undefined ? current.currency : input.currency,
+          input.durationMinutes === undefined ? current.durationMinutes : input.durationMinutes,
+          input.imageMediaId === undefined ? current.imageMediaId : input.imageMediaId,
+          input.active ?? current.active,
+          input.available ?? current.available,
+          input.quantityAllowed ?? current.quantityAllowed,
+          input.sortOrder ?? current.sortOrder,
+        ],
+      );
+      return result.rows[0] === undefined ? null : this.toItem(result.rows[0]);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new MenuItemNameConflictError();
+      throw error;
+    }
   }
 
   public async setItemActive(id: string, active: boolean): Promise<MenuItemRecord | null> {

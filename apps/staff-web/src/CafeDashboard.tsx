@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FormEvent, ReactNode } from 'react';
 
@@ -26,6 +26,7 @@ import {
   type ActiveRequestFilter,
 } from './CafeDashboard.helpers';
 import type { AuthCopy, CafeCopy, CafeDashboardCopy, Language } from './i18n';
+import { StaffRealtimeIndicator, useStaffRealtime } from './StaffRealtime';
 
 interface StaffUser {
   displayName: string;
@@ -46,7 +47,8 @@ type PaginationItem = number | 'ellipsis';
 
 const REQUEST_PAGE_SIZE = 10;
 const ACTIVE_FETCH_PAGE_SIZE = 100;
-const REFRESH_INTERVAL_MS = 30_000;
+const LIVE_REFRESH_INTERVAL_MS = 60_000;
+const OFFLINE_REFRESH_INTERVAL_MS = 15_000;
 
 function formatDateTime(value: string, language: Language): string {
   const date = new Date(value);
@@ -101,7 +103,8 @@ function StatusPill({ status, copy }: { status: RequestStatus; copy: CafeDashboa
     NEW: { label: copy.newStatus, className: 'is-new' },
     IN_PROCESS: { label: copy.inProcessStatus, className: 'is-in-process' },
     COMPLETED: { label: copy.completedStatus, className: 'is-completed' },
-  }[status];
+    CANCELLED: { label: 'Cancelled', className: 'is-cancelled' },
+  }[status] ?? { label: 'Cancelled', className: 'is-cancelled' };
 
   return <span className={`cafe-request-status ${statusCopy.className}`}>{statusCopy.label}</span>;
 }
@@ -318,7 +321,7 @@ function RequestDrawer({
             </p>
           </section>
 
-          {request.status !== 'COMPLETED' && (
+          {request.status !== 'COMPLETED' && request.status !== 'CANCELLED' && (
             <div className="admin-form-actions cafe-request-drawer__actions">
               <button className="admin-button admin-button--quiet" onClick={onClose} type="button">
                 {cafeCopy.cancel}
@@ -420,9 +423,21 @@ export function CafeDashboard({
   const [selectedRequest, setSelectedRequest] = useState<StaffRequest | null>(null);
   const [busyRequestId, setBusyRequestId] = useState('');
   const [toast, setToast] = useState('');
+  const [highlightedRequestIds, setHighlightedRequestIds] = useState<Set<string>>(() => new Set());
+  const activeLoadController = useRef<AbortController | null>(null);
+  const loadSequence = useRef(0);
+  const realtimeRefreshTimer = useRef<number | null>(null);
+  const realtimeHighlightTimeouts = useRef(new Map<string, number>());
+  const { status: realtimeStatus, subscribe } = useStaffRealtime();
 
   const loadDashboard = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
+      activeLoadController.current?.abort();
+      const controller = new AbortController();
+      activeLoadController.current = controller;
+      const requestSequence = ++loadSequence.current;
+      const isCurrentRequest = () =>
+        requestSequence === loadSequence.current && !controller.signal.aborted;
       if (silent) setRefreshing(true);
       else setLoading(true);
       setError('');
@@ -434,26 +449,36 @@ export function CafeDashboard({
 
       try {
         const [newResponse, inProcessResponse, historyResponse] = await Promise.all([
-          managementApi.listDepartmentRequests({
-            ...commonFilters,
-            status: 'NEW',
-            page: 1,
-            pageSize: ACTIVE_FETCH_PAGE_SIZE,
-          }),
-          managementApi.listDepartmentRequests({
-            ...commonFilters,
-            status: 'IN_PROCESS',
-            page: 1,
-            pageSize: ACTIVE_FETCH_PAGE_SIZE,
-          }),
-          managementApi.listDepartmentRequests({
-            ...commonFilters,
-            status: 'COMPLETED',
-            page: historyPage,
-            pageSize: REQUEST_PAGE_SIZE,
-          }),
+          managementApi.listDepartmentRequests(
+            {
+              ...commonFilters,
+              status: 'NEW',
+              page: 1,
+              pageSize: ACTIVE_FETCH_PAGE_SIZE,
+            },
+            controller.signal,
+          ),
+          managementApi.listDepartmentRequests(
+            {
+              ...commonFilters,
+              status: 'IN_PROCESS',
+              page: 1,
+              pageSize: ACTIVE_FETCH_PAGE_SIZE,
+            },
+            controller.signal,
+          ),
+          managementApi.listDepartmentRequests(
+            {
+              ...commonFilters,
+              status: 'COMPLETED',
+              page: historyPage,
+              pageSize: REQUEST_PAGE_SIZE,
+            },
+            controller.signal,
+          ),
         ]);
 
+        if (!isCurrentRequest()) return;
         setActiveRequests(sortRequests([...newResponse.items, ...inProcessResponse.items]));
         setHistoryRequests(historyResponse.items);
         setCounts({
@@ -464,25 +489,105 @@ export function CafeDashboard({
         setHistoryTotal(historyResponse.total);
         setLastUpdated(new Date().toISOString());
       } catch (requestError) {
+        if (
+          (requestError instanceof Error && requestError.name === 'AbortError') ||
+          !isCurrentRequest()
+        ) {
+          return;
+        }
         setError(requestErrorMessage(requestError, copy));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (isCurrentRequest()) {
+          setLoading(false);
+          setRefreshing(false);
+          if (activeLoadController.current === controller) activeLoadController.current = null;
+        }
       }
     },
     [copy, historyPage, roomFilter],
   );
+
+  const queueRealtimeRefresh = useCallback(() => {
+    if (realtimeRefreshTimer.current !== null) return;
+    realtimeRefreshTimer.current = window.setTimeout(() => {
+      realtimeRefreshTimer.current = null;
+      void loadDashboard({ silent: true });
+    }, 160);
+  }, [loadDashboard]);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      void loadDashboard({ silent: true });
-    }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-  }, [loadDashboard]);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadDashboard({ silent: true });
+    };
+    const interval = window.setInterval(
+      refreshIfVisible,
+      realtimeStatus === 'live' ? LIVE_REFRESH_INTERVAL_MS : OFFLINE_REFRESH_INTERVAL_MS,
+    );
+    window.addEventListener('focus', refreshIfVisible);
+    window.addEventListener('online', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshIfVisible);
+      window.removeEventListener('online', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [loadDashboard, realtimeStatus]);
+
+  useEffect(() => {
+    if (realtimeStatus !== 'live') return undefined;
+    void loadDashboard({ silent: true });
+    return undefined;
+  }, [loadDashboard, realtimeStatus]);
+
+  useEffect(() => {
+    const unsubscribe = subscribe((event) => {
+      if (
+        (event.eventType !== 'staff.request.created' &&
+          event.eventType !== 'staff.request.updated') ||
+        event.unit !== 'CAFE'
+      ) {
+        return;
+      }
+      setHighlightedRequestIds((current) => {
+        const next = new Set(current);
+        next.add(event.entityId);
+        return next;
+      });
+      const previousTimeout = realtimeHighlightTimeouts.current.get(event.entityId);
+      if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
+      const timeout = window.setTimeout(() => {
+        setHighlightedRequestIds((current) => {
+          const next = new Set(current);
+          next.delete(event.entityId);
+          return next;
+        });
+        realtimeHighlightTimeouts.current.delete(event.entityId);
+      }, 4_000);
+      realtimeHighlightTimeouts.current.set(event.entityId, timeout);
+      setToast(copy.requestUpdated);
+      queueRealtimeRefresh();
+    });
+    return unsubscribe;
+  }, [copy.requestUpdated, queueRealtimeRefresh, subscribe]);
+
+  useEffect(
+    () => () => {
+      activeLoadController.current?.abort();
+      if (realtimeRefreshTimer.current !== null) {
+        window.clearTimeout(realtimeRefreshTimer.current);
+        realtimeRefreshTimer.current = null;
+      }
+      for (const timeout of realtimeHighlightTimeouts.current.values())
+        window.clearTimeout(timeout);
+      realtimeHighlightTimeouts.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (toast.length === 0) return undefined;
@@ -596,6 +701,7 @@ export function CafeDashboard({
             <strong>{copy.orders}</strong>
           </div>
           <div className="admin-topbar__actions">
+            <StaffRealtimeIndicator language={language} />
             <AdminLanguageSwitcher
               authCopy={authCopy}
               language={language}
@@ -770,7 +876,14 @@ export function CafeDashboard({
                     </thead>
                     <tbody>
                       {visibleRequests.map((request) => (
-                        <tr key={request.id}>
+                        <tr
+                          className={
+                            highlightedRequestIds.has(request.id)
+                              ? 'is-realtime-highlighted'
+                              : undefined
+                          }
+                          key={request.id}
+                        >
                           <td data-label={copy.room}>
                             <strong className="cafe-room-number">{request.room.number}</strong>
                           </td>
@@ -791,7 +904,7 @@ export function CafeDashboard({
                             >
                               {copy.viewDetails}
                             </button>
-                            {request.status !== 'COMPLETED' && (
+                            {request.status !== 'COMPLETED' && request.status !== 'CANCELLED' && (
                               <button
                                 className="admin-button admin-button--primary cafe-request-action"
                                 disabled={busyRequestId === request.id}

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Hadith Hotel</string>
+    <string name="app_name">EGI TV</string>
     <string name="tv_loading_title">Yuklanmoqda</string>
     <string name="tv_loading_message">Xona xizmatlarini tayyorlayapmiz.</string>
     <string name="tv_pairing_title">Televizorni ulang</string>
@@ -14,9 +14,18 @@
     <string name="tv_error_pairing_expired">Ulash kodi muddati tugadi. Yangi kod tayyorlanmoqda.</string>
     <string name="tv_retry">Qayta urinish</string>
     <string name="tv_request_submitted">So‘rov yuborildi.</string>
-    <string name="tv_request_unit_conflict">Bitta so‘rovda faqat bitta xizmat bo‘lishi mumkin.</string>
+    <string name="tv_combined_request">Birlashtirilgan so‘rov</string>
     <string name="tv_brand">HADITH HOTEL</string>
-    <string name="tv_room">Xona %1$s</string>
+    <string name="tv_room_label">XONA</string>
+    <string name="tv_stay_check_in">KIRISH</string>
+    <string name="tv_stay_check_out">CHIQISH</string>
+    <string name="tv_stay_status">TURAR JOY</string>
+    <string name="tv_stay_days_remaining_one">%1$d kun qoldi</string>
+    <string name="tv_stay_days_remaining">%1$d kun qoldi</string>
+    <string name="tv_stay_checkout_today">Bugun chiqish · %1$s</string>
+    <string name="tv_stay_total_days">%1$d kunlik turar joy</string>
+    <string name="tv_stay_ended">Turar joy muddati tugagan</string>
+    <string name="tv_stay_unavailable">Turar joy ma’lumotlari mavjud emas</string>
     <string name="tv_home">Bosh sahifa</string>
     <string name="tv_my_requests">So‘rovlarim</string>
     <string name="tv_cart">Tanlov (%1$d)</string>
@@ -26,6 +35,14 @@
     <string name="tv_service_unavailable">Mehmon joylashgach foydalanish mumkin.</string>
     <string name="tv_about">Mehmonxona haqida</string>
     <string name="tv_about_description">Hadith Hotel, qulaylik va mehmondo‘stlik haqida.</string>
+    <string name="tv_gallery_stay_description">Xonalar va suitlar ichidagi sokinlik, yorug‘lik va iliq detallar.</string>
+    <string name="tv_gallery_taste_description">Saji Nusantara va 7Oz Espresso’dan tanlangan ta’mlar.</string>
+    <string name="tv_gallery_rest_description">Suv, bug‘, parvarish va sokinlik uchun yaratilgan lahzalar.</string>
+    <string name="tv_gallery_open">Kattalashtirish</string>
+    <string name="tv_gallery_photo">%1$d / %2$d</string>
+    <string name="tv_gallery_saji">Saji Nusantara</string>
+    <string name="tv_gallery_7oz">7Oz Espresso</string>
+    <string name="tv_gallery_unavailable">Gallery hozircha mavjud emas.</string>
     <string name="tv_destinations">Manzillar</string>
     <string name="tv_destinations_description">Samarqanddagi ilhomlantiruvchi tarixiy maskanlar.</string>
     <string name="tv_welcome_hotel">Hadith Hotel ga xush kelibsiz</string>
@@ -37,12 +54,14 @@
     <string name="tv_cafe">7oz Espresso Cafe</string>
     <string name="tv_spa">SPA</string>
     <string name="tv_beauty_salon">Beauty Salon</string>
+    <string name="tv_butik_indonesia">Butik Indonesia</string>
     <string name="tv_explore">Ochish</string>
     <string name="tv_unavailable">Hozir mavjud emas</string>
     <string name="tv_saji_nusantara">Saji Nusantara</string>
     <string name="tv_lounge">Lounge</string>
     <string name="tv_fnb_description">Saji Nusantara va Lounge’da mazali tanaffus.</string>
     <string name="tv_menu_description">Mavjud tanlovdan xizmatni tanlang.</string>
+    <string name="tv_all">Barchasi</string>
     <string name="tv_view_cart">Tanlovni ko‘rish</string>
     <string name="tv_no_menu">Bu xizmatda hozircha mavjud menyu yo‘q.</string>
     <string name="tv_menu_not_configured">Bu xizmat hali sozlanmagan.</string>
@@ -51,7 +70,13 @@
     <string name="tv_next">Keyingi</string>
     <string name="tv_add">Qo‘shish</string>
     <string name="tv_price_not_set">Narx belgilanmagan</string>
+    <string name="tv_select_variant">Variantni tanlang</string>
+    <string name="tv_stock">Qoldiq: %1$d</string>
+    <string name="tv_sku">SKU: %1$s</string>
+    <string name="tv_out_of_stock">Qoldiq tugagan</string>
     <string name="tv_your_request">Sizning so‘rovingiz</string>
+    <string name="tv_cart_description">Tanlovingizni tekshiring va so‘rovni yuboring.</string>
+    <string name="tv_requests_description">Yuborilgan so‘rovlaringiz holatini shu yerda kuzating.</string>
     <string name="tv_cart_empty">Tanlovingiz hozircha bo‘sh.</string>
     <string name="tv_remove">Olib tashlash</string>
     <string name="tv_submitting">Yuborilmoqda…</string>
@@ -60,6 +85,17 @@
     <string name="tv_status_new">Yangi</string>
     <string name="tv_status_in_process">Jarayonda</string>
     <string name="tv_status_completed">Bajarildi</string>
+    <string name="tv_status_cancelled">Bekor qilindi</string>
     <string name="tv_back">Orqaga</string>
     <string name="tv_not_ready">Ma’lumot hozircha tayyor emas.</string>
+    <string name="tv_update_brand">EGI TV</string>
+    <string name="tv_update_title">Yangi versiya tayyor</string>
+    <string name="tv_update_ready_message">EGI TV %1$s versiyaga yangilanishga tayyor. O‘rnatish uchun davom eting.</string>
+    <string name="tv_update_permission_message">Yangilanishni o‘rnatish uchun Android sozlamalarida EGI TV ga ruxsat bering.</string>
+    <string name="tv_update_failed">Yangilanish tayyorlanmadi</string>
+    <string name="tv_update_failed_message">Yangilanishni xavfsiz tayyorlab bo‘lmadi. Qayta urinib ko‘ring.</string>
+    <string name="tv_update_install">O‘rnatish</string>
+    <string name="tv_update_open_settings">Sozlamalarni ochish</string>
+    <string name="tv_update_retry">Qayta urinish</string>
+    <string name="tv_update_later">Keyinroq</string>
 </resources>

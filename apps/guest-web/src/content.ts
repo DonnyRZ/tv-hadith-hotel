@@ -7,6 +7,8 @@ import {
   type LocalizedText,
 } from '@room-service/translations';
 
+import type { GalleryId } from './gallery-manifest';
+
 export type IconName =
   | 'arrow'
   | 'back'
@@ -33,9 +35,18 @@ export interface UiCopy extends GuestCopy {
   aboutKicker: string;
   aboutStory: string;
   add: string;
+  boutiqueAll: string;
+  boutiqueCategory: string;
+  boutiqueOutOfStock: string;
+  boutiqueSelectVariant: string;
+  boutiqueStock: string;
+  boutiqueSku: string;
   allServices: string;
   back: string;
   close: string;
+  combinedRequest: string;
+  combinedRequestDescription: string;
+  combinedRequestSentDescription: string;
   continueExploring: string;
   destinations: string;
   destinationsDescription: string;
@@ -45,6 +56,11 @@ export interface UiCopy extends GuestCopy {
   fnb: string;
   fnbDescription: string;
   guestServices: string;
+  galleryPhotoCount: (current: number, total: number) => string;
+  galleryRestDescription: string;
+  galleryStayDescription: string;
+  galleryTasteDescription: string;
+  galleryUnavailable: string;
   hotelMoments: string;
   homeDescription: string;
   homeKicker: string;
@@ -62,20 +78,26 @@ export interface UiCopy extends GuestCopy {
   requestSheetDescription: string;
   requestSummary: string;
   requestUnit: string;
-  requestUnitConflict: string;
   room: string;
   serviceDescription: string;
   serviceKicker: string;
   services: string;
   statusCompleted: string;
+  statusCancelled: string;
   statusInProcess: string;
   statusNew: string;
   statusUpdated: string;
+  stayCheckOut: string;
+  stayCheckOutToday: (time: string) => string;
+  stayDaysRemaining: (days: number) => string;
+  stayDetails: string;
+  stayEnded: string;
+  stayTotalDays: (days: number) => string;
+  stayUnavailable: string;
   accessRequired: string;
   accessDescription: string;
   accessError: string;
   accessNotReady: string;
-  oneServicePerRequest: string;
   trackRequests: string;
   viewRequests: string;
   videoUnavailable: string;
@@ -96,9 +118,19 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     aboutStory:
       'Har bir lahza muloyim xizmat, iliq yorug‘lik va o‘zingizni uyda his qilishingiz uchun yaratilgan.',
     add: 'Qo‘shish',
+    boutiqueAll: 'Barchasi',
+    boutiqueCategory: 'Kategoriya',
+    boutiqueOutOfStock: 'Stok tugagan',
+    boutiqueSelectVariant: 'Variantni tanlang',
+    boutiqueStock: 'Mavjud',
+    boutiqueSku: 'SKU',
     allServices: 'Barcha xizmatlar',
     back: 'Orqaga',
     close: 'Yopish',
+    combinedRequest: 'Birlashtirilgan so‘rov',
+    combinedRequestDescription: 'Tanlovingiz har bir xizmat jamoasiga alohida yuborildi.',
+    combinedRequestSentDescription:
+      'So‘rovingiz barcha tegishli jamoalarga yuborildi. Har bir xizmat holatini alohida kuzatishingiz mumkin.',
     continueExploring: 'Ko‘rishni davom ettirish',
     destinations: 'Manzillar',
     destinationsDescription: 'Samarqandning eng yaqin va ilhomlantiruvchi tarixiy maskanlari.',
@@ -107,6 +139,12 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     explore: 'Ochish',
     fnb: 'F&B',
     fnbDescription: 'Taom, qahva va mehmonxonadagi yoqimli tanaffuslar.',
+    galleryPhotoCount: (current, total) =>
+      `${String(current).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
+    galleryRestDescription: 'Suv, bug‘, parvarish va sokinlik uchun yaratilgan lahzalar.',
+    galleryStayDescription: 'Junior Suite ichidagi sokinlik, yorug‘lik va iliq detallar.',
+    galleryTasteDescription: 'Saji Nusantara va 7Oz Espresso’dan tanlangan ta’mlar.',
+    galleryUnavailable: 'Gallery hozircha mavjud emas.',
     guestServices: 'Mehmon xizmatlari',
     hotelMoments: 'Mehmonxona lahzalari',
     homeDescription: 'Kerakli xizmatni tanlang — biz qolganini siz uchun soddalashtiramiz.',
@@ -126,23 +164,28 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     requestSheetDescription: 'Yuborishdan oldin tanlovingizni tekshiring.',
     requestSummary: 'So‘rovni ko‘rib chiqish',
     requestUnit: 'Xizmat',
-    requestUnitConflict:
-      'Bitta so‘rovda faqat bitta xizmat bo‘lishi mumkin. Avval tanlovni tozalang.',
     room: 'Xona',
     serviceDescription: 'Xonangizdan chiqmasdan, kerakli xizmatni bir necha bosishda so‘rang.',
     serviceKicker: 'Siz uchun',
     services: 'Xizmatlar',
     statusCompleted: 'Bajarildi',
-    statusInProcess: 'Diproses',
+    statusCancelled: 'Bekor qilingan',
+    statusInProcess: 'Jarayonda',
     statusNew: 'Yangi',
     statusUpdated: 'Holat yangilandi',
+    stayCheckOut: 'Chiqish',
+    stayCheckOutToday: (time) => `Bugun · ${time}`,
+    stayDaysRemaining: (days) => `${days} kun qoldi`,
+    stayDetails: 'Turar joyingiz',
+    stayEnded: 'Turar joy muddati tugagan',
+    stayTotalDays: (days) => `${days} kunlik turar joy`,
+    stayUnavailable: 'Turar joy ma’lumotlari mavjud emas',
     accessRequired: 'Xonangizdan kirishni boshlang',
     accessDescription: 'Hadith Hotel xizmatlarini ko‘rish uchun xonangizdagi QR kodni skanerlang.',
     accessError:
       'Ushbu kirish havolasi endi faol emas. Yangi QR kod uchun resepsiyaga murojaat qiling.',
     accessNotReady:
       'Xona uchun mehmon kirishi hali tayyor emas. Iltimos, resepsiyaga murojaat qiling.',
-    oneServicePerRequest: 'Har bir so‘rov bitta xizmatdan iborat bo‘lishi kerak.',
     trackRequests: 'So‘rovlarni kuzatish',
     viewRequests: 'So‘rovlarimni ko‘rish',
     videoUnavailable: 'Video hozircha mavjud emas.',
@@ -155,9 +198,19 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     aboutKicker: 'Hadith Hotel',
     aboutStory: 'Каждая деталь создана для мягкого сервиса, тёплого света и ощущения дома.',
     add: 'Добавить',
+    boutiqueAll: 'Все',
+    boutiqueCategory: 'Категория',
+    boutiqueOutOfStock: 'Нет в наличии',
+    boutiqueSelectVariant: 'Выберите вариант',
+    boutiqueStock: 'Доступно',
+    boutiqueSku: 'SKU',
     allServices: 'Все услуги',
     back: 'Назад',
     close: 'Закрыть',
+    combinedRequest: 'Общий запрос',
+    combinedRequestDescription: 'Выбор отправлен отдельным командам каждого сервиса.',
+    combinedRequestSentDescription:
+      'Запрос отправлен всем нужным командам. Статус каждого сервиса можно проверить отдельно.',
     continueExploring: 'Продолжить знакомство',
     destinations: 'Места рядом',
     destinationsDescription: 'Исторические места Самарканда, которые вдохновляют и легко посетить.',
@@ -166,6 +219,12 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     explore: 'Открыть',
     fnb: 'F&B',
     fnbDescription: 'Еда, кофе и приятные паузы в отеле.',
+    galleryPhotoCount: (current, total) =>
+      `${String(current).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
+    galleryRestDescription: 'Вода, пар, уход и тихие моменты, созданные для отдыха.',
+    galleryStayDescription: 'Тишина, свет и тёплые детали Junior Suite.',
+    galleryTasteDescription: 'Избранные вкусы Saji Nusantara и 7Oz Espresso.',
+    galleryUnavailable: 'Галерея пока недоступна.',
     guestServices: 'Сервисы для гостей',
     hotelMoments: 'Моменты отеля',
     homeDescription: 'Выберите нужную услугу — остальное мы сделаем проще для вас.',
@@ -185,21 +244,26 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     requestSheetDescription: 'Проверьте выбор перед отправкой.',
     requestSummary: 'Проверить запрос',
     requestUnit: 'Сервис',
-    requestUnitConflict:
-      'Один запрос может содержать позиции только одного сервиса. Очистите выбор, чтобы продолжить.',
     room: 'Номер',
     serviceDescription: 'Закажите нужный сервис из номера в несколько понятных шагов.',
     serviceKicker: 'Для вас',
     services: 'Услуги',
     statusCompleted: 'Выполнено',
+    statusCancelled: 'Отменено',
     statusInProcess: 'В работе',
     statusNew: 'Новый',
     statusUpdated: 'Статус обновлён',
+    stayCheckOut: 'Выезд',
+    stayCheckOutToday: (time) => `Сегодня · ${time}`,
+    stayDaysRemaining: (days) => `${days} дн. осталось`,
+    stayDetails: 'Ваше проживание',
+    stayEnded: 'Срок проживания завершён',
+    stayTotalDays: (days) => `Проживание · ${days} дн.`,
+    stayUnavailable: 'Данные о проживании недоступны',
     accessRequired: 'Начните с доступа из номера',
     accessDescription: 'Отсканируйте QR-код в номере, чтобы открыть сервисы Hadith Hotel.',
     accessError: 'Эта ссылка доступа больше не активна. Обратитесь на ресепшен за новым QR-кодом.',
     accessNotReady: 'Доступ для этого номера ещё не готов. Пожалуйста, обратитесь на ресепшен.',
-    oneServicePerRequest: 'Каждый запрос должен относиться к одному сервису.',
     trackRequests: 'Отслеживать запросы',
     viewRequests: 'Мои запросы',
     videoUnavailable: 'Видео пока недоступно.',
@@ -213,9 +277,19 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     aboutStory:
       'Every detail is made for gentle service, warm light and the feeling of being at home.',
     add: 'Add',
+    boutiqueAll: 'All',
+    boutiqueCategory: 'Category',
+    boutiqueOutOfStock: 'Out of stock',
+    boutiqueSelectVariant: 'Select a variant',
+    boutiqueStock: 'Available',
+    boutiqueSku: 'SKU',
     allServices: 'All services',
     back: 'Back',
     close: 'Close',
+    combinedRequest: 'Combined request',
+    combinedRequestDescription: 'Your selection was sent to each service team separately.',
+    combinedRequestSentDescription:
+      'Your request has reached every relevant team. You can follow each service separately.',
     continueExploring: 'Continue exploring',
     destinations: 'Destinations',
     destinationsDescription:
@@ -225,6 +299,13 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     explore: 'Explore',
     fnb: 'F&B',
     fnbDescription: 'Food, coffee and considered pauses within the hotel.',
+    galleryPhotoCount: (current, total) =>
+      `${String(current).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
+    galleryRestDescription: 'Water, warmth, care and quiet moments designed for slowing down.',
+    galleryStayDescription:
+      'A quiet look inside the Junior Suite, shaped by light and warm detail.',
+    galleryTasteDescription: 'A considered selection from Saji Nusantara and 7Oz Espresso.',
+    galleryUnavailable: 'This gallery is not available yet.',
     guestServices: 'Guest services',
     hotelMoments: 'Hotel moments',
     homeDescription: 'Choose what you need — we will make the rest feel effortless.',
@@ -244,22 +325,27 @@ export const UI_COPY: Readonly<Record<Language, UiCopy>> = {
     requestSheetDescription: 'Take a moment to review your selection before sending.',
     requestSummary: 'Review request',
     requestUnit: 'Service',
-    requestUnitConflict:
-      'A request can contain items from one service only. Clear your selection to continue.',
     room: 'Room',
     serviceDescription: 'Ask for what you need from your room in a few clear steps.',
     serviceKicker: 'Made for you',
     services: 'Services',
     statusCompleted: 'Completed',
+    statusCancelled: 'Cancelled',
     statusInProcess: 'In progress',
     statusNew: 'New',
     statusUpdated: 'Status updated',
+    stayCheckOut: 'Check-out',
+    stayCheckOutToday: (time) => `Today · ${time}`,
+    stayDaysRemaining: (days) => `${days} ${days === 1 ? 'day' : 'days'} remaining`,
+    stayDetails: 'Your stay',
+    stayEnded: 'Stay period ended',
+    stayTotalDays: (days) => `${days}-day stay`,
+    stayUnavailable: 'Stay details unavailable',
     accessRequired: 'Start with your room access',
     accessDescription: 'Scan the QR code in your room to open Hadith Hotel guest services.',
     accessError:
       'This access link is no longer active. Please contact reception for a new QR code.',
     accessNotReady: 'Guest access for this room is not ready yet. Please contact reception.',
-    oneServicePerRequest: 'Each request must belong to one service.',
     trackRequests: 'Track requests',
     viewRequests: 'View my requests',
     videoUnavailable: 'Video is not available right now.',
@@ -308,6 +394,17 @@ export const SERVICE_ENTRIES: ReadonlyArray<{
     unitCodes: ['CAFE'],
   },
   {
+    key: 'BUTIK_INDONESIA',
+    icon: 'spark',
+    title: { uz: 'Butik Indonesia', ru: 'Butik Indonesia', en: 'Butik Indonesia' },
+    description: {
+      uz: 'Indoneziya mahsulotlari va esdalik sovg‘alari.',
+      ru: 'Индонезийские товары и памятные подарки.',
+      en: 'Indonesian goods and considered keepsakes.',
+    },
+    unitCodes: ['BUTIK_INDONESIA'],
+  },
+  {
     key: 'SPA',
     icon: 'waves',
     title: { uz: 'SPA', ru: 'SPA', en: 'SPA' },
@@ -338,12 +435,14 @@ export const UNIT_COPY: Readonly<Record<UnitCode, LocalizedText>> = {
   SPA: { uz: 'SPA', ru: 'SPA', en: 'SPA' },
   HOUSEKEEPING: { uz: 'Housekeeping', ru: 'Housekeeping', en: 'Housekeeping' },
   BEAUTY_AND_SALON: { uz: 'Beauty Salon', ru: 'Beauty Salon', en: 'Beauty Salon' },
+  BUTIK_INDONESIA: { uz: 'Butik Indonesia', ru: 'Butik Indonesia', en: 'Butik Indonesia' },
 };
 
 export const ABOUT_FEATURES: ReadonlyArray<{
   title: LocalizedText;
   body: LocalizedText;
   image: string;
+  gallery: GalleryId;
 }> = [
   {
     title: { uz: 'Sokin mehmonxona', ru: 'Спокойный отель', en: 'A quieter stay' },
@@ -353,6 +452,7 @@ export const ABOUT_FEATURES: ReadonlyArray<{
       en: 'A luminous courtyard, a warm welcome and comfort available from your room.',
     },
     image: '/assets/hadith-hotel/about/hotel-exterior.png',
+    gallery: 'stay',
   },
   {
     title: { uz: 'Ta’m va suhbat', ru: 'Вкус и разговор', en: 'Taste and conversation' },
@@ -362,6 +462,7 @@ export const ABOUT_FEATURES: ReadonlyArray<{
       en: 'Saji Nusantara and 7oz Espresso Cafe for any moment of the day.',
     },
     image: '/assets/hadith-hotel/about/saji-nusantara.png',
+    gallery: 'taste',
   },
   {
     title: { uz: 'Dam olish va parvarish', ru: 'Отдых и уход', en: 'Rest and care' },
@@ -371,8 +472,47 @@ export const ABOUT_FEATURES: ReadonlyArray<{
       en: 'The pool, SPA and salon help you ease gently into the rest of your day.',
     },
     image: '/assets/hadith-hotel/about/pool.png',
+    gallery: 'rest',
   },
 ];
+
+export const GALLERY_ITEM_LABELS: Readonly<Record<string, LocalizedText>> = {
+  'junior-suite-01': {
+    uz: 'Junior Suite · yotoq xonasi',
+    ru: 'Junior Suite · спальня',
+    en: 'Junior Suite · bedroom',
+  },
+  'junior-suite-02': {
+    uz: 'Junior Suite · yashash maydoni',
+    ru: 'Junior Suite · гостиная',
+    en: 'Junior Suite · living area',
+  },
+  'junior-suite-03': {
+    uz: 'Junior Suite · dam olish maydoni',
+    ru: 'Junior Suite · зона отдыха',
+    en: 'Junior Suite · lounge',
+  },
+  'junior-suite-04': {
+    uz: 'Junior Suite · rakovina maydoni',
+    ru: 'Junior Suite · зона умывальника',
+    en: 'Junior Suite · vanity',
+  },
+  'junior-suite-05': {
+    uz: 'Junior Suite · hammom',
+    ru: 'Junior Suite · ванная комната',
+    en: 'Junior Suite · bathroom',
+  },
+  'junior-suite-06': {
+    uz: 'Junior Suite · o‘tirish maydoni',
+    ru: 'Junior Suite · зона отдыха',
+    en: 'Junior Suite · sitting area',
+  },
+  'rest-pool': { uz: 'Basseyn', ru: 'Бассейн', en: 'Pool' },
+  'rest-hamam': { uz: 'Hammom', ru: 'Хамам', en: 'Hamam' },
+  'rest-massage': { uz: 'Massaj', ru: 'Массаж', en: 'Massage' },
+  'rest-sauna': { uz: 'Sauna', ru: 'Сауна', en: 'Sauna' },
+  'rest-salon': { uz: 'Salon', ru: 'Салон', en: 'Salon' },
+};
 
 export const DESTINATIONS: ReadonlyArray<{
   title: LocalizedText;
@@ -443,6 +583,7 @@ export function localize(value: LocalizedText | null | undefined, language: Lang
 export function departmentForUnit(unit: UnitCode): DepartmentCode {
   if (unit === 'CAFE') return 'CAFE';
   if (unit === 'RESTAURANT' || unit === 'LOUNGE') return 'FOOD_AND_BEVERAGES';
+  if (unit === 'BUTIK_INDONESIA') return 'BUTIK_INDONESIA';
   return unit;
 }
 

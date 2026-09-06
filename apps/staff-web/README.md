@@ -4,6 +4,15 @@ This is the single desktop-first internal workspace for Room Manager,
 Receptionist, Superadmin, SPA, Restaurant, Lounge, Housekeeping, Beauty and
 Salon, and Cafe roles.
 
+For production deployment and TV pairing diagnostics, every developer and
+deployer must read:
+
+- [`../../Docs/runtime-environment-contract.md`](../../Docs/runtime-environment-contract.md)
+- [`../../Docs/tv-pairing-runbook.md`](../../Docs/tv-pairing-runbook.md)
+- [`../../Docs/tv-pairing-troubleshooting.md`](../../Docs/tv-pairing-troubleshooting.md)
+- [`../../Docs/tv-release-checklist.md`](../../Docs/tv-release-checklist.md)
+- [`../../Docs/staff-realtime-runbook.md`](../../Docs/staff-realtime-runbook.md)
+
 The current slice implements the multilingual authentication entry point and
 the first internal workspaces:
 
@@ -26,6 +35,10 @@ the first internal workspaces:
   for the 114 guest rooms across physical Floors 1–3. Each floor retains its
   supplied 2xx, 3xx, or 4xx room range and is paginated at ten rooms per page.
   The current frontend-first slice uses clearly temporary local status values;
+  the Receptionist sidebar also links to `/housekeeping/requests`, which is
+  scoped by the API to Housekeeping requests only. Receptionists can review,
+  confirm, and complete those guest requests without gaining access to any
+  other operational unit.
   guest assignment forms and live room API wiring are intentionally deferred.
 - Cafe menu management is limited to the `CAFE` unit by the API; the UI never
   accepts a unit switch for this workspace.

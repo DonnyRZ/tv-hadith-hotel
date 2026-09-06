@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FormEvent, ReactNode } from 'react';
 
@@ -29,16 +29,21 @@ import {
 } from './CafeDashboard.helpers';
 import type { AuthCopy, Language, OperationalCopy, OperationalRole } from './i18n';
 import { operationalCopy } from './i18n';
+import { StaffRealtimeIndicator, useStaffRealtime } from './StaffRealtime';
 
 interface StaffUser {
+  id: string;
   displayName: string;
   roles: string[];
 }
 
 interface OperationalDashboardProps {
   authCopy: AuthCopy;
+  backLabel?: string | undefined;
+  embedded?: boolean;
   language: Language;
   onLanguageChange: (language: Language) => void;
+  onBackToReceptionist?: (() => void) | undefined;
   onNavigate: ((page: 'requests' | 'menu') => void) | undefined;
   onSignOut: () => void;
   role: OperationalRole;
@@ -51,7 +56,78 @@ type UnitFilter = RoomManagerUnit | 'ALL';
 
 const REQUEST_PAGE_SIZE = 10;
 const ACTIVE_FETCH_PAGE_SIZE = 100;
-const REFRESH_INTERVAL_MS = 30_000;
+const LIVE_REFRESH_INTERVAL_MS = 60_000;
+const OFFLINE_REFRESH_INTERVAL_MS = 15_000;
+
+interface OperationalDashboardSnapshot {
+  activeRequests: StaffRequest[];
+  historyRequests: StaffRequest[];
+  counts: { newCount: number; inProcessCount: number; completedCount: number };
+  historyTotal: number;
+  lastUpdated: string;
+}
+
+const operationalDashboardCache = new Map<string, OperationalDashboardSnapshot>();
+const OPERATIONAL_CACHE_VERSION = 1;
+const OPERATIONAL_CACHE_PREFIX = 'room-service:operational-dashboard:v1:';
+
+function operationalCacheStorageKey(cacheKey: string): string {
+  return `${OPERATIONAL_CACHE_PREFIX}${encodeURIComponent(cacheKey)}`;
+}
+
+function readOperationalSnapshot(cacheKey: string): OperationalDashboardSnapshot | undefined {
+  const memorySnapshot = operationalDashboardCache.get(cacheKey);
+  if (memorySnapshot !== undefined) return memorySnapshot;
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = window.sessionStorage.getItem(operationalCacheStorageKey(cacheKey));
+    if (raw === null) return undefined;
+    const payload = JSON.parse(raw) as {
+      version?: number;
+      snapshot?: OperationalDashboardSnapshot;
+    };
+    if (
+      payload.version !== OPERATIONAL_CACHE_VERSION ||
+      payload.snapshot === undefined ||
+      !Array.isArray(payload.snapshot.activeRequests) ||
+      !Array.isArray(payload.snapshot.historyRequests) ||
+      typeof payload.snapshot.historyTotal !== 'number' ||
+      typeof payload.snapshot.lastUpdated !== 'string'
+    ) {
+      return undefined;
+    }
+    operationalDashboardCache.set(cacheKey, payload.snapshot);
+    return payload.snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeOperationalSnapshot(cacheKey: string, snapshot: OperationalDashboardSnapshot): void {
+  operationalDashboardCache.set(cacheKey, snapshot);
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(
+      operationalCacheStorageKey(cacheKey),
+      JSON.stringify({ version: OPERATIONAL_CACHE_VERSION, snapshot }),
+    );
+  } catch {
+    // A full or restricted sessionStorage must never block the live API path.
+  }
+}
+
+function scheduleIdle(callback: () => void): () => void {
+  const idleWindow = window as Window & {
+    cancelIdleCallback?: (id: number) => void;
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  };
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const idleId = idleWindow.requestIdleCallback(callback, { timeout: 250 });
+    return () => idleWindow.cancelIdleCallback?.(idleId);
+  }
+  const timeoutId = globalThis.setTimeout(callback, 40);
+  return () => globalThis.clearTimeout(timeoutId);
+}
 
 const DEPARTMENT_UNITS: Record<Exclude<OperationalRole, 'ROOM_MANAGER'>, MenuUnit> = {
   SPA: 'SPA',
@@ -114,7 +190,8 @@ function StatusPill({ status, copy }: { status: RequestStatus; copy: Operational
     NEW: { label: copy.newStatus, className: 'is-new' },
     IN_PROCESS: { label: copy.inProcessStatus, className: 'is-in-process' },
     COMPLETED: { label: copy.completedStatus, className: 'is-completed' },
-  }[status];
+    CANCELLED: { label: 'Cancelled', className: 'is-cancelled' },
+  }[status] ?? { label: 'Cancelled', className: 'is-cancelled' };
 
   return <span className={`cafe-request-status ${statusCopy.className}`}>{statusCopy.label}</span>;
 }
@@ -278,6 +355,10 @@ function RequestDrawer({
               <span>{copy.room}</span>
               <strong>{request.room.number}</strong>
             </div>
+            <div>
+              <span>{copy.guest}</span>
+              <strong>{request.guestName ?? '—'}</strong>
+            </div>
             {unitName !== undefined && (
               <div>
                 <span>{copy.unit}</span>
@@ -349,19 +430,22 @@ function RequestDrawer({
             </p>
           </section>
 
-          {!readOnly && request.status !== 'COMPLETED' && onTransition !== undefined && (
-            <div className="admin-form-actions cafe-request-drawer__actions">
-              <button
-                className="admin-button admin-button--primary"
-                disabled={busy}
-                onClick={() => onTransition(request)}
-                type="button"
-              >
-                {request.status === 'NEW' ? copy.confirmRequest : copy.markDone}
-                <ArrowIcon direction="right" />
-              </button>
-            </div>
-          )}
+          {!readOnly &&
+            request.status !== 'COMPLETED' &&
+            request.status !== 'CANCELLED' &&
+            onTransition !== undefined && (
+              <div className="admin-form-actions cafe-request-drawer__actions">
+                <button
+                  className="admin-button admin-button--primary"
+                  disabled={busy}
+                  onClick={() => onTransition(request)}
+                  type="button"
+                >
+                  {request.status === 'NEW' ? copy.confirmRequest : copy.markDone}
+                  <ArrowIcon direction="right" />
+                </button>
+              </div>
+            )}
         </div>
       </aside>
     </div>,
@@ -390,8 +474,11 @@ function RequestSummary({ request, copy }: { request: StaffRequest; copy: Operat
 
 export function OperationalDashboard({
   authCopy,
+  backLabel,
+  embedded = false,
   language,
   onLanguageChange,
+  onBackToReceptionist,
   onNavigate,
   onSignOut,
   role,
@@ -403,28 +490,53 @@ export function OperationalDashboard({
   const hasCatalog =
     role === 'SPA' || role === 'RESTAURANT' || role === 'LOUNGE' || role === 'BEAUTY_AND_SALON';
   const departmentUnit = isRoomManager ? undefined : DEPARTMENT_UNITS[role];
+  const cacheKey = `${user.id}:${role}`;
+  const cachedSnapshot = readOperationalSnapshot(cacheKey);
+  const hasInitialSnapshot = useRef(cachedSnapshot !== undefined).current;
+  const activeLoadController = useRef<AbortController | null>(null);
+  const loadSequence = useRef(0);
   const [tab, setTab] = useState<DashboardTab>('active');
   const [activeFilter, setActiveFilter] = useState<ActiveRequestFilter>('ALL');
   const [unitFilter, setUnitFilter] = useState<UnitFilter>('ALL');
   const [roomInput, setRoomInput] = useState('');
   const [roomFilter, setRoomFilter] = useState('');
-  const [activeRequests, setActiveRequests] = useState<StaffRequest[]>([]);
-  const [historyRequests, setHistoryRequests] = useState<StaffRequest[]>([]);
-  const [counts, setCounts] = useState({ newCount: 0, inProcessCount: 0, completedCount: 0 });
-  const [historyTotal, setHistoryTotal] = useState(0);
+  const [activeRequests, setActiveRequests] = useState<StaffRequest[]>(
+    () => cachedSnapshot?.activeRequests ?? [],
+  );
+  const [historyRequests, setHistoryRequests] = useState<StaffRequest[]>(
+    () => cachedSnapshot?.historyRequests ?? [],
+  );
+  const [counts, setCounts] = useState(
+    () => cachedSnapshot?.counts ?? { newCount: 0, inProcessCount: 0, completedCount: 0 },
+  );
+  const [historyTotal, setHistoryTotal] = useState(() => cachedSnapshot?.historyTotal ?? 0);
   const [activePage, setActivePage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => cachedSnapshot === undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(
+    () => cachedSnapshot?.lastUpdated ?? null,
+  );
   const [selectedRequest, setSelectedRequest] = useState<StaffRequest | null>(null);
   const [busyRequestId, setBusyRequestId] = useState('');
   const [toast, setToast] = useState('');
+  const [highlightedRequestIds, setHighlightedRequestIds] = useState<Set<string>>(() => new Set());
+  const realtimeRefreshTimer = useRef<number | null>(null);
+  const realtimeHighlightTimeouts = useRef(new Map<string, number>());
+  const { status: realtimeStatus, subscribe } = useStaffRealtime();
 
   const loadDashboard = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
-      if (silent) setRefreshing(true);
+      activeLoadController.current?.abort();
+      const controller = new AbortController();
+      activeLoadController.current = controller;
+      const signal = controller.signal;
+      const requestSequence = ++loadSequence.current;
+      const isCurrentRequest = () =>
+        requestSequence === loadSequence.current && !controller.signal.aborted;
+
+      if (silent || readOperationalSnapshot(cacheKey) !== undefined) setRefreshing(true);
       else setLoading(true);
       setError('');
 
@@ -437,16 +549,22 @@ export function OperationalDashboard({
         };
 
         if (isRoomManager) {
-          return managementApi.listRoomManagerRequests({
-            ...commonFilters,
-            ...(unitFilter === 'ALL' ? {} : { unit: unitFilter }),
-          });
+          return managementApi.listRoomManagerRequests(
+            {
+              ...commonFilters,
+              ...(unitFilter === 'ALL' ? {} : { unit: unitFilter }),
+            },
+            signal,
+          );
         }
 
-        return managementApi.listDepartmentRequests({
-          ...commonFilters,
-          unit: departmentUnit as MenuUnit,
-        });
+        return managementApi.listDepartmentRequests(
+          {
+            ...commonFilters,
+            unit: departmentUnit as MenuUnit,
+          },
+          signal,
+        );
       };
 
       try {
@@ -456,35 +574,137 @@ export function OperationalDashboard({
           listForStatus('COMPLETED', historyPage, REQUEST_PAGE_SIZE),
         ]);
 
-        setActiveRequests(sortRequests([...newResponse.items, ...inProcessResponse.items]));
-        setHistoryRequests(historyResponse.items);
-        setCounts({
+        const nextActiveRequests = sortRequests([...newResponse.items, ...inProcessResponse.items]);
+        const nextCounts = {
           newCount: newResponse.total,
           inProcessCount: inProcessResponse.total,
           completedCount: historyResponse.total,
-        });
+        };
+        if (!isCurrentRequest()) return;
+        setActiveRequests(nextActiveRequests);
+        setHistoryRequests(historyResponse.items);
+        setCounts(nextCounts);
         setHistoryTotal(historyResponse.total);
-        setLastUpdated(new Date().toISOString());
+        const nextUpdatedAt = new Date().toISOString();
+        setLastUpdated(nextUpdatedAt);
+        writeOperationalSnapshot(cacheKey, {
+          activeRequests: nextActiveRequests,
+          historyRequests: historyResponse.items,
+          counts: nextCounts,
+          historyTotal: historyResponse.total,
+          lastUpdated: nextUpdatedAt,
+        });
       } catch (requestError) {
+        if (
+          (requestError instanceof Error && requestError.name === 'AbortError') ||
+          !isCurrentRequest()
+        )
+          return;
         setError(requestErrorMessage(requestError, copy));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (isCurrentRequest()) {
+          setLoading(false);
+          setRefreshing(false);
+          if (activeLoadController.current === controller) activeLoadController.current = null;
+        }
       }
     },
-    [copy, departmentUnit, historyPage, isRoomManager, roomFilter, unitFilter],
+    [cacheKey, copy, departmentUnit, historyPage, isRoomManager, role, roomFilter, unitFilter],
   );
 
-  useEffect(() => {
-    void loadDashboard();
+  const queueRealtimeRefresh = useCallback(() => {
+    if (realtimeRefreshTimer.current !== null) return;
+    realtimeRefreshTimer.current = window.setTimeout(() => {
+      realtimeRefreshTimer.current = null;
+      void loadDashboard({ silent: true });
+    }, 160);
   }, [loadDashboard]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      void loadDashboard({ silent: true });
-    }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-  }, [loadDashboard]);
+    const run = () => void loadDashboard({ silent: hasInitialSnapshot });
+    const cancelIdle = embedded ? scheduleIdle(run) : (run(), () => undefined);
+    return () => {
+      cancelIdle();
+      activeLoadController.current?.abort();
+    };
+  }, [embedded, hasInitialSnapshot, loadDashboard]);
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadDashboard({ silent: true });
+    };
+    const interval = window.setInterval(
+      refreshIfVisible,
+      realtimeStatus === 'live' ? LIVE_REFRESH_INTERVAL_MS : OFFLINE_REFRESH_INTERVAL_MS,
+    );
+    window.addEventListener('focus', refreshIfVisible);
+    window.addEventListener('online', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshIfVisible);
+      window.removeEventListener('online', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [loadDashboard, realtimeStatus]);
+
+  useEffect(() => {
+    if (realtimeStatus !== 'live') return undefined;
+    void loadDashboard({ silent: true });
+    return undefined;
+  }, [loadDashboard, realtimeStatus]);
+
+  useEffect(() => {
+    const unsubscribe = subscribe((event) => {
+      if (
+        event.eventType !== 'staff.request.created' &&
+        event.eventType !== 'staff.request.updated'
+      )
+        return;
+      if (isRoomManager && unitFilter !== 'ALL' && event.unit !== unitFilter) return;
+      if (!isRoomManager && event.unit !== departmentUnit) return;
+
+      setHighlightedRequestIds((current) => {
+        const next = new Set(current);
+        next.add(event.entityId);
+        return next;
+      });
+      const previousTimeout = realtimeHighlightTimeouts.current.get(event.entityId);
+      if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
+      const timeout = window.setTimeout(() => {
+        setHighlightedRequestIds((current) => {
+          const next = new Set(current);
+          next.delete(event.entityId);
+          return next;
+        });
+        realtimeHighlightTimeouts.current.delete(event.entityId);
+      }, 4_000);
+      realtimeHighlightTimeouts.current.set(event.entityId, timeout);
+      setToast(copy.requestUpdated);
+      queueRealtimeRefresh();
+    });
+    return unsubscribe;
+  }, [
+    copy.requestUpdated,
+    departmentUnit,
+    isRoomManager,
+    queueRealtimeRefresh,
+    subscribe,
+    unitFilter,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (realtimeRefreshTimer.current !== null) {
+        window.clearTimeout(realtimeRefreshTimer.current);
+        realtimeRefreshTimer.current = null;
+      }
+      for (const timeout of realtimeHighlightTimeouts.current.values())
+        window.clearTimeout(timeout);
+      realtimeHighlightTimeouts.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (toast.length === 0) return undefined;
@@ -573,64 +793,82 @@ export function OperationalDashboard({
   ];
 
   return (
-    <div className="admin-shell operational-dashboard">
-      <aside className="admin-sidebar">
-        <div className="admin-sidebar__brand">
-          <AdminBrandMark />
-          <div>
-            <strong>Hadith Hotel</strong>
-            <span>{copy.administration}</span>
+    <div
+      className={
+        embedded
+          ? 'operational-dashboard operational-dashboard--embedded'
+          : 'admin-shell operational-dashboard'
+      }
+    >
+      {!embedded && (
+        <aside className="admin-sidebar">
+          <div className="admin-sidebar__brand">
+            <AdminBrandMark />
+            <div>
+              <strong>Hadith Hotel</strong>
+              <span>{copy.administration}</span>
+            </div>
           </div>
-        </div>
-        <div className="admin-sidebar__rule" />
-        <p className="admin-sidebar__label">{copy.mainNavigation}</p>
-        <nav aria-label={copy.mainNavigation} className="admin-sidebar__nav">
-          <button
-            className="admin-nav-item is-active"
-            onClick={() => onNavigate?.('requests')}
-            type="button"
-          >
-            <OrdersIcon />
-            <span>{roleCopy.navLabel}</span>
-            <ArrowIcon direction="right" />
-          </button>
-          {hasCatalog && (
-            <button className="admin-nav-item" onClick={() => onNavigate?.('menu')} type="button">
-              <MenuIcon />
-              <span>{copy.menu}</span>
+          <div className="admin-sidebar__rule" />
+          <p className="admin-sidebar__label">{copy.mainNavigation}</p>
+          <nav aria-label={copy.mainNavigation} className="admin-sidebar__nav">
+            <button
+              className="admin-nav-item is-active"
+              onClick={() => onNavigate?.('requests')}
+              type="button"
+            >
+              <OrdersIcon />
+              <span>{roleCopy.navLabel}</span>
               <ArrowIcon direction="right" />
             </button>
-          )}
-        </nav>
-      </aside>
+            {onBackToReceptionist !== undefined && (
+              <button className="admin-nav-item" onClick={onBackToReceptionist} type="button">
+                <ArrowIcon direction="left" />
+                <span>{backLabel ?? 'Reception'}</span>
+                <ArrowIcon direction="right" />
+              </button>
+            )}
+            {hasCatalog && (
+              <button className="admin-nav-item" onClick={() => onNavigate?.('menu')} type="button">
+                <MenuIcon />
+                <span>{copy.menu}</span>
+                <ArrowIcon direction="right" />
+              </button>
+            )}
+          </nav>
+        </aside>
+      )}
 
-      <div className="admin-main">
-        <header className="admin-topbar">
-          <div className="admin-breadcrumb">
-            <span>{copy.administration}</span>
-            <ArrowIcon direction="right" />
-            <strong>{roleCopy.title}</strong>
-          </div>
-          <div className="admin-topbar__actions">
-            <AdminLanguageSwitcher
-              authCopy={authCopy}
-              language={language}
-              onChange={onLanguageChange}
-            />
-            <div className="admin-topbar__user">
-              <span className="admin-avatar admin-avatar--small">
-                {getInitials(user.displayName)}
-              </span>
-              <span>
-                <strong>{user.displayName}</strong>
-                <small>{authCopy.roleLabels[role]}</small>
-              </span>
+      <div className={embedded ? 'operational-dashboard__embedded-main' : 'admin-main'}>
+        {!embedded && (
+          <header className="admin-topbar">
+            <div className="admin-breadcrumb">
+              <span>{copy.administration}</span>
+              <ArrowIcon direction="right" />
+              <strong>{roleCopy.title}</strong>
             </div>
-            <button className="admin-signout" onClick={onSignOut} type="button">
-              {authCopy.signOut}
-            </button>
-          </div>
-        </header>
+            <div className="admin-topbar__actions">
+              <StaffRealtimeIndicator language={language} />
+              <AdminLanguageSwitcher
+                authCopy={authCopy}
+                language={language}
+                onChange={onLanguageChange}
+              />
+              <div className="admin-topbar__user">
+                <span className="admin-avatar admin-avatar--small">
+                  {getInitials(user.displayName)}
+                </span>
+                <span>
+                  <strong>{user.displayName}</strong>
+                  <small>{authCopy.roleLabels[role]}</small>
+                </span>
+              </div>
+              <button className="admin-signout" onClick={onSignOut} type="button">
+                {authCopy.signOut}
+              </button>
+            </div>
+          </header>
+        )}
 
         <main className="admin-content admin-content--cafe cafe-dashboard-content operational-dashboard-content">
           {error.length > 0 && (
@@ -804,6 +1042,7 @@ export function OperationalDashboard({
                       <tr>
                         {isRoomManager && <th>{copy.unit}</th>}
                         <th>{copy.room}</th>
+                        <th>{copy.guest}</th>
                         <th>{copy.request}</th>
                         <th>{copy.requested}</th>
                         <th>{copy.filterStatus}</th>
@@ -812,7 +1051,14 @@ export function OperationalDashboard({
                     </thead>
                     <tbody>
                       {visibleRequests.map((request) => (
-                        <tr key={request.id}>
+                        <tr
+                          className={
+                            highlightedRequestIds.has(request.id)
+                              ? 'is-realtime-highlighted'
+                              : undefined
+                          }
+                          key={request.id}
+                        >
                           {isRoomManager && (
                             <td data-label={copy.unit}>
                               <span className="operational-unit-name">
@@ -822,6 +1068,11 @@ export function OperationalDashboard({
                           )}
                           <td data-label={copy.room}>
                             <strong className="cafe-room-number">{request.room.number}</strong>
+                          </td>
+                          <td data-label={copy.guest}>
+                            <span className="operational-guest-name">
+                              {request.guestName ?? '—'}
+                            </span>
                           </td>
                           <td data-label={copy.request}>
                             <RequestSummary copy={copy} request={request} />
@@ -840,16 +1091,18 @@ export function OperationalDashboard({
                             >
                               {copy.viewDetails}
                             </button>
-                            {!isRoomManager && request.status !== 'COMPLETED' && (
-                              <button
-                                className="admin-button admin-button--primary cafe-request-action"
-                                disabled={busyRequestId === request.id}
-                                onClick={() => void transitionRequest(request)}
-                                type="button"
-                              >
-                                {request.status === 'NEW' ? copy.confirmRequest : copy.markDone}
-                              </button>
-                            )}
+                            {!isRoomManager &&
+                              request.status !== 'COMPLETED' &&
+                              request.status !== 'CANCELLED' && (
+                                <button
+                                  className="admin-button admin-button--primary cafe-request-action"
+                                  disabled={busyRequestId === request.id}
+                                  onClick={() => void transitionRequest(request)}
+                                  type="button"
+                                >
+                                  {request.status === 'NEW' ? copy.confirmRequest : copy.markDone}
+                                </button>
+                              )}
                           </td>
                         </tr>
                       ))}

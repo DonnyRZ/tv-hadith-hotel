@@ -73,7 +73,16 @@ describe('guest context, catalog, and request API', () => {
       room: { number: '201' },
       roomStatus: 'OCCUPIED',
       welcome: { guestName: 'QR Guest', personalized: true },
+      stay: {
+        totalDays: 3,
+        timeZone: 'Asia/Tashkent',
+        checkInAt: expect.any(String),
+        checkOutAt: expect.any(String),
+      },
     });
+    expect(Date.parse(context.body.stay.checkOutAt) - Date.parse(context.body.stay.checkInAt)).toBe(
+      3 * 24 * 60 * 60 * 1000,
+    );
     expect(context.body.availableUnits).toEqual([
       'CAFE',
       'RESTAURANT',
@@ -311,6 +320,108 @@ describe('guest context, catalog, and request API', () => {
       expect.arrayContaining([
         expect.objectContaining({ id: requestResponse.body.id, status: 'NEW' }),
       ]),
+    );
+  });
+
+  it('creates one atomic request group across units and preserves it on retry', async () => {
+    const receptionist = await login('receptionist@hadith-hotel.com');
+    const cafe = await login('cafe@hadith-hotel.com');
+    const restaurant = await login('restaurant@hadith-hotel.com');
+    const token = await issueGuestToken(receptionist, '204');
+    await assignRoom(receptionist, '204', 'Combined Cart Guest');
+
+    const [cafeMenu, restaurantMenu] = await Promise.all([
+      request(app.getHttpServer())
+        .get('/api/v1/guest/menus')
+        .query({ unit: 'CAFE', page: 1, pageSize: 1 })
+        .set('X-Guest-Access-Token', token)
+        .expect(200),
+      request(app.getHttpServer())
+        .get('/api/v1/guest/menus')
+        .query({ unit: 'RESTAURANT', page: 1, pageSize: 1 })
+        .set('X-Guest-Access-Token', token)
+        .expect(200),
+    ]);
+    const clientRequestId = randomUUID();
+    const payload = {
+      clientRequestId,
+      guestNote: 'Please deliver together.',
+      items: [
+        { menuItemId: cafeMenu.body.items[0].id, quantity: 1 },
+        { menuItemId: restaurantMenu.body.items[0].id, quantity: 1 },
+      ],
+    };
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/guest/request-groups')
+      .set('X-Guest-Access-Token', token)
+      .send(payload)
+      .expect(201);
+    expect(created.body.clientRequestId).toBe(clientRequestId);
+    expect(created.body.requests).toHaveLength(2);
+    expect(created.body.requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientRequestId, unit: 'CAFE', status: 'NEW' }),
+        expect.objectContaining({ clientRequestId, unit: 'RESTAURANT', status: 'NEW' }),
+      ]),
+    );
+
+    const invalidClientRequestId = randomUUID();
+    await request(app.getHttpServer())
+      .post('/api/v1/guest/request-groups')
+      .set('X-Guest-Access-Token', token)
+      .send({
+        clientRequestId: invalidClientRequestId,
+        items: [payload.items[0], { menuItemId: randomUUID(), quantity: 1 }],
+      })
+      .expect(404);
+
+    const afterInvalid = await request(app.getHttpServer())
+      .get('/api/v1/guest/requests')
+      .set('X-Guest-Access-Token', token)
+      .expect(200);
+    expect(afterInvalid.body.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientRequestId: invalidClientRequestId }),
+      ]),
+    );
+
+    const retry = await request(app.getHttpServer())
+      .post('/api/v1/guest/request-groups')
+      .set('X-Guest-Access-Token', token)
+      .send({ ...payload, items: [payload.items[0]] })
+      .expect(201);
+    expect(retry.body.requests.map((item: { id: string }) => item.id).sort()).toEqual(
+      created.body.requests.map((item: { id: string }) => item.id).sort(),
+    );
+
+    const guestRequests = await request(app.getHttpServer())
+      .get('/api/v1/guest/requests')
+      .set('X-Guest-Access-Token', token)
+      .expect(200);
+    expect(guestRequests.body.total).toBe(2);
+    expect(guestRequests.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientRequestId, unit: 'CAFE' }),
+        expect.objectContaining({ clientRequestId, unit: 'RESTAURANT' }),
+      ]),
+    );
+
+    const [cafeQueue, restaurantQueue] = await Promise.all([
+      cafe
+        .get('/api/v1/department/requests')
+        .query({ unit: 'CAFE', room: '204', page: 1, pageSize: 10 })
+        .expect(200),
+      restaurant
+        .get('/api/v1/department/requests')
+        .query({ unit: 'RESTAURANT', room: '204', page: 1, pageSize: 10 })
+        .expect(200),
+    ]);
+    expect(cafeQueue.body.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ clientRequestId, unit: 'CAFE' })]),
+    );
+    expect(restaurantQueue.body.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ clientRequestId, unit: 'RESTAURANT' })]),
     );
   });
 

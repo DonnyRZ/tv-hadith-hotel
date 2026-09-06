@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
+import { RequestModule } from '../requests/request.module';
 import {
   InMemoryReceptionistRepository,
   PostgresReceptionistRepository,
@@ -10,12 +11,14 @@ import {
 import { ReceptionistController } from './receptionist.controller';
 import { ReceptionistService } from './receptionist.service';
 import { RoomAssignmentEventBus } from './room-assignment-events';
+import { StaffRoomEventBridge } from './staff-room-event-bridge';
 
 @Module({
-  imports: [AuthModule, ConfigModule],
+  imports: [AuthModule, ConfigModule, RequestModule],
   controllers: [ReceptionistController],
   providers: [
     RoomAssignmentEventBus,
+    StaffRoomEventBridge,
     ReceptionistService,
     {
       provide: RECEPTIONIST_REPOSITORY,

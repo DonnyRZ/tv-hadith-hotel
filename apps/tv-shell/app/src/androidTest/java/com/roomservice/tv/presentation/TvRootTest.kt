@@ -9,10 +9,14 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.isFocused
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyPress
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.roomservice.tv.data.DepartmentListResponse
 import com.roomservice.tv.data.DepartmentSummary
 import com.roomservice.tv.data.DepartmentUnit
@@ -26,6 +30,7 @@ import com.roomservice.tv.data.TvContext
 import com.roomservice.tv.data.TvDevice
 import com.roomservice.tv.data.TvGuestData
 import com.roomservice.tv.data.TvSnapshot
+import com.roomservice.tv.data.TvStay
 import com.roomservice.tv.data.TvLanguage
 import com.roomservice.tv.data.UnitCode
 import com.roomservice.tv.data.WelcomeState
@@ -56,6 +61,10 @@ class TvRootTest {
         }
 
         composeRule.onNodeWithText("Welcome, Ahmad Fauzan").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Room 302").assertCountEquals(0)
+        composeRule.onNodeWithText("CHECK-IN").assertIsDisplayed()
+        composeRule.onNodeWithText("CHECK-OUT").assertIsDisplayed()
+        composeRule.onNodeWithText("STAY").assertIsDisplayed()
         composeRule.onNodeWithText("Home").assertIsDisplayed()
         composeRule.onNodeWithText("Service").assertIsDisplayed()
         composeRule.onNodeWithText("About hotel").assertIsDisplayed()
@@ -117,6 +126,53 @@ class TvRootTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Service").assertIsDisplayed()
     }
+
+    @Test
+    fun uzbekIsTheDefaultAndLanguageSwitcherUpdatesUiCopy() {
+        var language by mutableStateOf(TvLanguage.UZ)
+        composeRule.setContent {
+            TvRoot(
+                language = language,
+                uiState = sampleReadyState(),
+                onInitialize = {},
+                onRetry = {},
+                onLanguageChange = { language = it },
+                onAddToCart = {},
+                onRemoveFromCart = {},
+                onSubmitCart = {},
+            )
+        }
+
+        composeRule.onNodeWithText("Bosh sahifa").assertIsDisplayed()
+        composeRule.onNodeWithText("Xizmatlar").assertIsDisplayed()
+        composeRule.onNodeWithText("Siz uchun").assertIsDisplayed()
+
+        composeRule.onNodeWithText("EN").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Home").assertIsDisplayed()
+        composeRule.onNodeWithText("Service").assertIsDisplayed()
+        composeRule.onNodeWithText("Made for you").assertIsDisplayed()
+    }
+
+    @Test
+    fun tasteAboutCardOpensTheSajiGalleryWithoutLeavingTheApp() {
+        composeRule.setContent {
+            TvRoot(
+                language = TvLanguage.EN,
+                uiState = sampleReadyState(),
+                onInitialize = {},
+                onRetry = {},
+                onLanguageChange = {},
+                onAddToCart = {},
+                onRemoveFromCart = {},
+                onSubmitCart = {},
+            )
+        }
+
+        composeRule.onNodeWithText("About hotel").performClick()
+        composeRule.onNodeWithText("Taste and conversation").performClick()
+        composeRule.onNodeWithText("Saji Nusantara").assertIsDisplayed()
+    }
 }
 
 private fun composeKeyEvent(action: Int, keyCode: Int): KeyEvent =
@@ -140,6 +196,12 @@ private fun sampleReadyState(): TvUiState.Ready = TvUiState.Ready(
                 message = "Welcome, Ahmad Fauzan",
                 guestName = "Ahmad Fauzan",
                 personalized = true,
+            ),
+            stay = TvStay(
+                checkInAt = "2030-08-30T10:00:00.000Z",
+                checkOutAt = "2030-09-02T10:00:00.000Z",
+                totalDays = 3,
+                timeZone = "Asia/Tashkent",
             ),
         ),
         guestData = TvGuestData(

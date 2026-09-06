@@ -9,6 +9,9 @@ WORKDIR /workspace
 ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
+ARG VITE_STAFF_REALTIME_ENABLED=true
+ENV VITE_STAFF_REALTIME_ENABLED=${VITE_STAFF_REALTIME_ENABLED}
+
 RUN corepack enable \
     && corepack prepare pnpm@11.19.0 --activate
 
@@ -20,6 +23,7 @@ RUN pnpm install --frozen-lockfile --filter @room-service/staff-web... \
 FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
+ENV REQUIRE_API_PROXY=true
 
 WORKDIR /app
 

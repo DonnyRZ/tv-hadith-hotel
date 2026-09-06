@@ -79,6 +79,7 @@ const PERMISSION_GROUPS = [
     codes: [
       'room-manager:monitor',
       'receptionist:rooms:view',
+      'receptionist:folio:view',
       'receptionist:guest:assign',
       'receptionist:guest:update',
       'receptionist:guest:checkout',
@@ -88,6 +89,10 @@ const PERMISSION_GROUPS = [
   {
     key: 'catalog',
     codes: ['menu:manage'],
+  },
+  {
+    key: 'boutique',
+    codes: ['request:cancel', 'inventory:manage', 'media:manage'],
   },
 ] as const;
 
@@ -741,6 +746,7 @@ function PermissionGroups({
     operations: copy.permissionGroupOperations,
     department: copy.permissionGroupDepartment,
     catalog: copy.permissionGroupCatalog,
+    boutique: copy.permissionGroupBoutique,
   };
   return (
     <div className="permission-groups">

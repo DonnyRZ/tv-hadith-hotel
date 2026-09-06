@@ -17,7 +17,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { StaffSessionGuard } from '../auth/guards/staff-session.guard';
 import { CurrentGuestContext } from './current-guest-context.decorator';
 import { BatchGuestAccessTokenDto } from './dto/batch-guest-access-token.dto';
-import { CreateGuestRequestDto } from './dto/create-guest-request.dto';
+import { CreateGuestRequestDto, CreateGuestRequestGroupDto } from './dto/create-guest-request.dto';
 import { ListGuestMenusDto } from './dto/list-guest-menus.dto';
 import { ListGuestRequestsDto } from './dto/list-guest-requests.dto';
 import { GuestContextGuard } from './guest-context.guard';
@@ -76,6 +76,15 @@ export class GuestController {
     @Body() input: CreateGuestRequestDto,
   ) {
     return this.guestService.createRequest(context, input);
+  }
+
+  @Post('request-groups')
+  @HttpCode(HttpStatus.CREATED)
+  public createRequestGroup(
+    @CurrentGuestContext() context: ResolvedGuestContext,
+    @Body() input: CreateGuestRequestGroupDto,
+  ) {
+    return this.guestService.createRequestGroup(context, input);
   }
 
   @Get('requests/:requestId')

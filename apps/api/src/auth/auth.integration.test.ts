@@ -75,11 +75,16 @@ describe('staff authentication API', () => {
       roles: ['RECEPTIONIST'],
     });
     expect(loginResponse.body.user.permissions).toEqual([
+      'receptionist:folio:view',
       'receptionist:guest:assign',
       'receptionist:guest:checkout',
       'receptionist:guest:update',
       'receptionist:rooms:view',
       'receptionist:tv:pair',
+      'request:complete',
+      'request:confirm',
+      'request:history',
+      'request:view',
     ]);
     expect(loginResponse.body.expiresAt).toEqual(expect.any(String));
     const sessionCookie = loginResponse.headers['set-cookie']?.[0] ?? '';

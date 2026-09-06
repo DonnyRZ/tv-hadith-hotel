@@ -1,7 +1,7 @@
 import type { UnitCode } from '../rbac/rbac.types';
 import type { LocalizedText } from '../menu/menu.types';
 
-export const REQUEST_STATUS_CODES = ['NEW', 'IN_PROCESS', 'COMPLETED'] as const;
+export const REQUEST_STATUS_CODES = ['NEW', 'IN_PROCESS', 'COMPLETED', 'CANCELLED'] as const;
 export type RequestStatus = (typeof REQUEST_STATUS_CODES)[number];
 
 export const DEPARTMENT_CODES = [
@@ -10,6 +10,7 @@ export const DEPARTMENT_CODES = [
   'HOUSEKEEPING',
   'BEAUTY_AND_SALON',
   'CAFE',
+  'BUTIK_INDONESIA',
 ] as const;
 export type DepartmentCode = (typeof DEPARTMENT_CODES)[number];
 
@@ -33,6 +34,9 @@ export interface RequestItemRecord {
   note: string | null;
   unitPrice: number | null;
   currency: string | null;
+  variantId?: string | null;
+  sku?: string | null;
+  variantOptions?: unknown[] | null;
 }
 
 export interface RequestActor {
@@ -53,6 +57,7 @@ export interface RequestRecord {
   id: string;
   clientRequestId: string;
   guestAssignmentId: string | null;
+  guestName: string | null;
   department: DepartmentCode;
   unit: UnitCode;
   room: RequestRoomReference;
@@ -62,20 +67,31 @@ export interface RequestRecord {
   requestedAt: string;
   confirmedAt: string | null;
   completedAt: string | null;
+  reservationExpiresAt: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  cancellationSource: 'STAFF' | 'AUTO_EXPIRY' | null;
   statusHistory: RequestStatusHistoryEntry[];
   createdAt: string;
   updatedAt: string;
 }
 
+export interface RequestTransitionMetadata {
+  cancellationReason?: string | null;
+  cancellationSource?: 'STAFF' | 'AUTO_EXPIRY';
+}
+
 export interface CreateRequestRecordInput {
   clientRequestId: string;
   guestAssignmentId?: string | null;
+  guestName?: string | null;
   department: DepartmentCode;
   unit: UnitCode;
   room: RequestRoomReference;
   items: RequestItemRecord[];
   guestNote: string | null;
   requestedAt?: string;
+  reservationExpiresAt?: string | null;
 }
 
 export interface RequestListFilter {

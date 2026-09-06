@@ -11,6 +11,9 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "./dist",
+    "paths": {
+      "@room-service/contracts/realtime-events": ["../../packages/contracts/src/realtime-events.ts"]
+    },
     "sourceMap": true,
     "types": ["node"],
     "verbatimModuleSyntax": false

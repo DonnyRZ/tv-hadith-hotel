@@ -47,7 +47,13 @@ export interface UpdateRoleInput {
 }
 
 export type MenuUnit =
-  'SPA' | 'RESTAURANT' | 'LOUNGE' | 'HOUSEKEEPING' | 'BEAUTY_AND_SALON' | 'CAFE';
+  | 'SPA'
+  | 'RESTAURANT'
+  | 'LOUNGE'
+  | 'HOUSEKEEPING'
+  | 'BEAUTY_AND_SALON'
+  | 'CAFE'
+  | 'BUTIK_INDONESIA';
 export type RoomManagerUnit = 'SPA' | 'RESTAURANT' | 'LOUNGE' | 'HOUSEKEEPING';
 
 export type MenuItemKind = 'PRODUCT' | 'SERVICE';
@@ -85,7 +91,7 @@ export interface MenuListOptions {
   pageSize?: number;
 }
 
-export type RequestStatus = 'NEW' | 'IN_PROCESS' | 'COMPLETED';
+export type RequestStatus = 'NEW' | 'IN_PROCESS' | 'COMPLETED' | 'CANCELLED';
 
 export interface StaffRequestItem {
   menuItemId: string;
@@ -97,6 +103,13 @@ export interface StaffRequestItem {
   note: string | null;
   unitPrice: number | null;
   currency: string | null;
+  variantId?: string | null;
+  sku?: string | null;
+  variantOptions?: Array<{
+    code: string;
+    label: LocalizedText;
+    value: LocalizedText;
+  }> | null;
 }
 
 export interface StaffRequest {
@@ -105,12 +118,17 @@ export interface StaffRequest {
   department: string;
   unit: MenuUnit;
   room: { id: string; number: string };
+  guestName: string | null;
   items: StaffRequestItem[];
   guestNote: string | null;
   status: RequestStatus;
   requestedAt: string;
   confirmedAt: string | null;
   completedAt: string | null;
+  reservationExpiresAt: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  cancellationSource: 'STAFF' | 'AUTO_EXPIRY' | null;
   statusHistory: Array<{
     id: string;
     fromStatus: RequestStatus | null;
@@ -163,6 +181,86 @@ export interface ReceptionistRoom {
   room: { id: string; number: string };
   roomStatus: ReceptionistRoomStatus;
   activeAssignment: GuestAssignment | null;
+  folioSummary: ReceptionistFolioSummary;
+}
+
+export interface ReceptionistFolioAmount {
+  currency: string;
+  amount: number;
+}
+
+export interface ReceptionistFolioStatusCounts {
+  NEW: number;
+  IN_PROCESS: number;
+  COMPLETED: number;
+  CANCELLED: number;
+}
+
+export interface ReceptionistFolioSummary {
+  orderCount: number;
+  openOrderCount: number;
+  statusCounts: ReceptionistFolioStatusCounts;
+  itemCount: number;
+  totalsByCurrency: ReceptionistFolioAmount[];
+  unpricedItemCount: number;
+  isTotalComplete: boolean;
+  lastOrderAt: string | null;
+}
+
+export interface ReceptionistFolioItem extends StaffRequestItem {
+  lineTotal: number | null;
+}
+
+export interface ReceptionistFolioOrder {
+  id: string;
+  guestAssignmentId: string | null;
+  guestName: string | null;
+  department: string;
+  unit: MenuUnit;
+  room: { id: string; number: string };
+  items: ReceptionistFolioItem[];
+  guestNote: string | null;
+  status: RequestStatus;
+  requestedAt: string;
+  confirmedAt: string | null;
+  completedAt: string | null;
+  reservationExpiresAt: string | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  cancellationSource: 'STAFF' | 'AUTO_EXPIRY' | null;
+  statusHistory: StaffRequest['statusHistory'];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReceptionistFolioResponse {
+  room: { id: string; number: string };
+  assignment: GuestAssignment | null;
+  orders: ReceptionistFolioOrder[];
+  summary: ReceptionistFolioSummary;
+  page: number;
+  pageSize: number;
+  total: number;
+  lastUpdated: string;
+}
+
+export interface ReceptionistFolioHistoryItem {
+  assignment: GuestAssignment;
+  summary: ReceptionistFolioSummary;
+}
+
+export interface ReceptionistFolioHistoryResponse {
+  room: { id: string; number: string };
+  items: ReceptionistFolioHistoryItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  lastUpdated: string;
+}
+
+export interface ReceptionistFolioListOptions {
+  page?: number;
+  pageSize?: number;
 }
 
 export interface ReceptionistRoomListOptions {
@@ -228,28 +326,198 @@ export interface UpdateMenuItemInput {
   sortOrder?: number;
 }
 
+export interface BoutiqueVariantOption {
+  code: string;
+  label: LocalizedText;
+  value: LocalizedText;
+}
+
+export interface BoutiqueCategory {
+  id: string;
+  localizedName: LocalizedText;
+  localizedDescription: LocalizedText | null;
+  imageMediaId: string | null;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BoutiqueVariant {
+  id: string;
+  menuItemId: string;
+  sku: string;
+  options: BoutiqueVariantOption[];
+  price: number;
+  currency: string;
+  active: boolean;
+  stockOnHand: number;
+  reservedQuantity: number;
+  availableQuantity: number;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BoutiqueProduct {
+  item: ManagedMenuItem;
+  categoryId: string;
+  category: BoutiqueCategory;
+  variants: BoutiqueVariant[];
+}
+
+export interface LocalizedBoutiqueInput {
+  uz: string;
+  ru: string;
+  en: string;
+}
+
+export interface CreateBoutiqueCategoryInput {
+  localizedName: LocalizedBoutiqueInput;
+  localizedDescription?: LocalizedBoutiqueInput | null;
+  imageMediaId?: string | null;
+  sortOrder?: number;
+}
+
+export interface UpdateBoutiqueCategoryInput {
+  localizedName?: LocalizedBoutiqueInput;
+  localizedDescription?: LocalizedBoutiqueInput | null;
+  imageMediaId?: string | null;
+  sortOrder?: number;
+}
+
+export interface CreateBoutiqueVariantInput {
+  sku: string;
+  options: BoutiqueVariantOption[];
+  price: number;
+  currency: string;
+  stockOnHand: number;
+  sortOrder?: number;
+}
+
+export interface CreateBoutiqueProductInput {
+  localizedName: LocalizedBoutiqueInput;
+  localizedDescription?: LocalizedBoutiqueInput | null;
+  categoryId: string;
+  imageMediaId?: string | null;
+  available?: boolean;
+  sortOrder?: number;
+  variants: CreateBoutiqueVariantInput[];
+}
+
+export interface UpdateBoutiqueProductInput {
+  localizedName?: LocalizedBoutiqueInput;
+  localizedDescription?: LocalizedBoutiqueInput | null;
+  categoryId?: string;
+  imageMediaId?: string | null;
+  available?: boolean;
+  sortOrder?: number;
+}
+
+export interface UpdateBoutiqueVariantInput {
+  sku?: string;
+  options?: BoutiqueVariantOption[];
+  price?: number;
+  currency?: string;
+  sortOrder?: number;
+}
+
+export interface MediaUploadResponse {
+  id: string;
+  objectKey: string;
+  contentType: string;
+  fileName: string;
+  byteSize: number;
+  createdAt: string;
+  url: string;
+}
+
+export interface StaffApiHealth {
+  status: 'ok';
+  service: 'room-service-api';
+  environment: string;
+  releaseId: string;
+  dependencies: {
+    database: 'ok' | 'memory' | 'unavailable';
+    mediaStorage: 'ok' | 'unavailable';
+    redis: 'ok' | 'memory' | 'disabled' | 'unavailable';
+    realtime: 'ok' | 'memory' | 'disabled' | 'unavailable';
+  };
+}
+
+interface StaffApiErrorOptions {
+  requestId?: string | null;
+  environment?: string | null;
+  releaseId?: string | null;
+  endpoint?: string;
+}
+
 export class StaffApiError extends Error {
   public constructor(
     message: string,
     public readonly status: number,
     public readonly code: string,
+    options: StaffApiErrorOptions = {},
   ) {
     super(message);
     this.name = 'StaffApiError';
+    this.requestId = options.requestId ?? null;
+    this.environment = options.environment ?? null;
+    this.releaseId = options.releaseId ?? null;
+    this.endpoint = options.endpoint ?? 'unknown';
+  }
+
+  public readonly requestId: string | null;
+  public readonly environment: string | null;
+  public readonly releaseId: string | null;
+  public readonly endpoint: string;
+}
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/+$/u, '');
+
+function apiEndpoint(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
+function stringFrom(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function fallbackErrorCode(status: number): string {
+  switch (status) {
+    case 401:
+      return 'UNAUTHORIZED';
+    case 403:
+      return 'FORBIDDEN';
+    case 404:
+      return 'RESOURCE_NOT_FOUND';
+    case 405:
+      return 'STAFF_API_PROXY_MISSING';
+    case 502:
+      return 'API_PROXY_UNAVAILABLE';
+    default:
+      return 'API_ERROR';
   }
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      ...(init?.body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...init?.headers,
-    },
-  });
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
+  let response: Response;
+  try {
+    response = await fetch(apiEndpoint(path), {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...(init?.body === undefined || isFormData ? {} : { 'Content-Type': 'application/json' }),
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    throw new StaffApiError('The Staff Web could not reach the API.', 0, 'STAFF_API_UNREACHABLE', {
+      endpoint: path,
+    });
+  }
   const rawBody = await response.text();
   let body: unknown = undefined;
 
@@ -263,9 +531,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const bodyRecord = isRecord(body) ? body : {};
-    const message = typeof bodyRecord.message === 'string' ? bodyRecord.message : 'Request failed.';
-    const code = typeof bodyRecord.code === 'string' ? bodyRecord.code : 'API_ERROR';
-    throw new StaffApiError(message, response.status, code);
+    const message =
+      typeof bodyRecord.message === 'string'
+        ? bodyRecord.message
+        : Array.isArray(bodyRecord.message)
+          ? bodyRecord.message.filter((item): item is string => typeof item === 'string').join('; ')
+          : 'Request failed.';
+    const code = stringFrom(bodyRecord.code) ?? fallbackErrorCode(response.status);
+    throw new StaffApiError(message, response.status, code, {
+      requestId: response.headers.get('X-Request-Id') ?? stringFrom(bodyRecord.requestId),
+      environment: stringFrom(bodyRecord.environment),
+      releaseId: stringFrom(bodyRecord.releaseId),
+      endpoint: path,
+    });
   }
 
   return body as T;
@@ -315,6 +593,14 @@ function withReceptionistRoomQuery(path: string, options: ReceptionistRoomListOp
   return encodedQuery.length === 0 ? path : `${path}?${encodedQuery}`;
 }
 
+function withFolioQuery(path: string, options: ReceptionistFolioListOptions): string {
+  const query = new URLSearchParams();
+  if (options.page !== undefined) query.set('page', String(options.page));
+  if (options.pageSize !== undefined) query.set('pageSize', String(options.pageSize));
+  const encodedQuery = query.toString();
+  return encodedQuery.length === 0 ? path : `${path}?${encodedQuery}`;
+}
+
 function withTvDeviceQuery(
   path: string,
   options: { roomId?: string; status?: TvProvisioningStatus; page?: number; pageSize?: number },
@@ -329,6 +615,26 @@ function withTvDeviceQuery(
 }
 
 export const managementApi = {
+  getApiHealth: async (): Promise<StaffApiHealth> => {
+    const health = await request<unknown>('/health');
+    if (
+      !isRecord(health) ||
+      health.status !== 'ok' ||
+      health.service !== 'room-service-api' ||
+      typeof health.environment !== 'string' ||
+      typeof health.releaseId !== 'string' ||
+      !isRecord(health.dependencies)
+    ) {
+      throw new StaffApiError(
+        'The Staff Web did not receive a valid API health response.',
+        200,
+        'STAFF_API_PROXY_MISSING',
+        { endpoint: '/health' },
+      );
+    }
+
+    return health as unknown as StaffApiHealth;
+  },
   listUsers: () => request<{ items: ManagedUser[] }>('/management/users'),
   createUser: (input: CreateUserInput) =>
     request<ManagedUser>('/management/users', {
@@ -372,36 +678,72 @@ export const managementApi = {
     request<{ items: ManagedMenuItem[]; page: number; pageSize: number; total: number }>(
       withQuery('/management/menu-items', options),
     ),
-  listDepartmentRequests: (options: DepartmentRequestListOptions = {}) =>
+  listDepartmentRequests: (options: DepartmentRequestListOptions = {}, signal?: AbortSignal) =>
     request<{ items: StaffRequest[]; page: number; pageSize: number; total: number }>(
       withRequestQuery('/department/requests', options),
+      signal === undefined ? undefined : { signal },
     ),
-  listRoomManagerRequests: (options: RoomManagerRequestListOptions = {}) =>
+  listRoomManagerRequests: (options: RoomManagerRequestListOptions = {}, signal?: AbortSignal) =>
     request<{
       items: RoomManagerRequest[];
       page: number;
       pageSize: number;
       total: number;
-    }>(withRequestQuery('/room-manager/requests', options)),
-  listReceptionistRooms: (options: ReceptionistRoomListOptions = {}) =>
+    }>(
+      withRequestQuery('/room-manager/requests', options),
+      signal === undefined ? undefined : { signal },
+    ),
+  listReceptionistRooms: (options: ReceptionistRoomListOptions = {}, signal?: AbortSignal) =>
     request<{ items: ReceptionistRoom[]; page: number; pageSize: number; total: number }>(
       withReceptionistRoomQuery('/receptionist/rooms', options),
+      signal === undefined ? undefined : { signal },
     ),
-  listAllReceptionistRooms: async (): Promise<ReceptionistRoom[]> => {
+  listAllReceptionistRooms: async (signal?: AbortSignal): Promise<ReceptionistRoom[]> => {
     const pageSize = 100;
-    const firstPage = await managementApi.listReceptionistRooms({ page: 1, pageSize });
+    const firstPage = await managementApi.listReceptionistRooms({ page: 1, pageSize }, signal);
     const totalPages = Math.max(1, Math.ceil(firstPage.total / pageSize));
     if (totalPages === 1) return firstPage.items;
 
     const remainingPages = await Promise.all(
       Array.from({ length: totalPages - 1 }, (_, index) =>
-        managementApi.listReceptionistRooms({ page: index + 2, pageSize }),
+        managementApi.listReceptionistRooms({ page: index + 2, pageSize }, signal),
       ),
     );
     return [firstPage, ...remainingPages].flatMap((page) => page.items);
   },
   getReceptionistRoom: (id: string) =>
     request<ReceptionistRoom>(`/receptionist/rooms/${encodeURIComponent(id)}`),
+  getReceptionistActiveFolio: (
+    roomId: string,
+    options: ReceptionistFolioListOptions = {},
+    signal?: AbortSignal,
+  ) =>
+    request<ReceptionistFolioResponse>(
+      withFolioQuery(`/receptionist/rooms/${encodeURIComponent(roomId)}/folio`, options),
+      signal === undefined ? undefined : { signal },
+    ),
+  listReceptionistFolioHistory: (
+    roomId: string,
+    options: ReceptionistFolioListOptions = {},
+    signal?: AbortSignal,
+  ) =>
+    request<ReceptionistFolioHistoryResponse>(
+      withFolioQuery(`/receptionist/rooms/${encodeURIComponent(roomId)}/folio/history`, options),
+      signal === undefined ? undefined : { signal },
+    ),
+  getReceptionistFolioHistoryDetail: (
+    roomId: string,
+    assignmentId: string,
+    options: ReceptionistFolioListOptions = {},
+    signal?: AbortSignal,
+  ) =>
+    request<ReceptionistFolioResponse>(
+      withFolioQuery(
+        `/receptionist/rooms/${encodeURIComponent(roomId)}/folio/history/${encodeURIComponent(assignmentId)}`,
+        options,
+      ),
+      signal === undefined ? undefined : { signal },
+    ),
   listTvDevices: (
     options: {
       roomId?: string;
@@ -478,6 +820,11 @@ export const managementApi = {
     request<StaffRequest>(`/department/requests/${encodeURIComponent(id)}/done`, {
       method: 'POST',
     }),
+  cancelDepartmentRequest: (id: string, reason?: string) =>
+    request<StaffRequest>(`/department/requests/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
   createMenuItem: (input: CreateMenuItemInput) =>
     request<ManagedMenuItem>('/management/menu-items', {
       method: 'POST',
@@ -496,4 +843,106 @@ export const managementApi = {
     request<ManagedMenuItem>(`/management/menu-items/${encodeURIComponent(id)}/deactivate`, {
       method: 'POST',
     }),
+  listBoutiqueCategories: (signal?: AbortSignal) =>
+    request<{ items: BoutiqueCategory[] }>(
+      '/management/boutique/categories',
+      signal === undefined ? undefined : { signal },
+    ),
+  createBoutiqueCategory: (input: CreateBoutiqueCategoryInput) =>
+    request<BoutiqueCategory>('/management/boutique/categories', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateBoutiqueCategory: (id: string, input: UpdateBoutiqueCategoryInput) =>
+    request<BoutiqueCategory>(`/management/boutique/categories/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  activateBoutiqueCategory: (id: string) =>
+    request<BoutiqueCategory>(
+      `/management/boutique/categories/${encodeURIComponent(id)}/activate`,
+      {
+        method: 'POST',
+      },
+    ),
+  deactivateBoutiqueCategory: (id: string) =>
+    request<BoutiqueCategory>(
+      `/management/boutique/categories/${encodeURIComponent(id)}/deactivate`,
+      {
+        method: 'POST',
+      },
+    ),
+  listBoutiqueProducts: (
+    options: {
+      includeInactive?: boolean;
+      categoryId?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (options.includeInactive !== undefined)
+      query.set('includeInactive', String(options.includeInactive));
+    if (options.categoryId !== undefined) query.set('categoryId', options.categoryId);
+    if (options.page !== undefined) query.set('page', String(options.page));
+    if (options.pageSize !== undefined) query.set('pageSize', String(options.pageSize));
+    const suffix = query.toString();
+    return request<{ items: BoutiqueProduct[]; page: number; pageSize: number; total: number }>(
+      `/management/boutique/products${suffix.length === 0 ? '' : `?${suffix}`}`,
+      signal === undefined ? undefined : { signal },
+    );
+  },
+  createBoutiqueProduct: (input: CreateBoutiqueProductInput) =>
+    request<BoutiqueProduct>('/management/boutique/products', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateBoutiqueProduct: (id: string, input: UpdateBoutiqueProductInput) =>
+    request<BoutiqueProduct>(`/management/boutique/products/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  activateBoutiqueProduct: (id: string) =>
+    request<BoutiqueProduct>(`/management/boutique/products/${encodeURIComponent(id)}/activate`, {
+      method: 'POST',
+    }),
+  deactivateBoutiqueProduct: (id: string) =>
+    request<BoutiqueProduct>(`/management/boutique/products/${encodeURIComponent(id)}/deactivate`, {
+      method: 'POST',
+    }),
+  createBoutiqueVariant: (productId: string, input: CreateBoutiqueVariantInput) =>
+    request<BoutiqueVariant>(
+      `/management/boutique/products/${encodeURIComponent(productId)}/variants`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  updateBoutiqueVariant: (id: string, input: UpdateBoutiqueVariantInput) =>
+    request<BoutiqueVariant>(`/management/boutique/variants/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  activateBoutiqueVariant: (id: string) =>
+    request<BoutiqueVariant>(`/management/boutique/variants/${encodeURIComponent(id)}/activate`, {
+      method: 'POST',
+    }),
+  deactivateBoutiqueVariant: (id: string) =>
+    request<BoutiqueVariant>(`/management/boutique/variants/${encodeURIComponent(id)}/deactivate`, {
+      method: 'POST',
+    }),
+  adjustBoutiqueStock: (id: string, delta: number, reason: string) =>
+    request<BoutiqueVariant>(
+      `/management/boutique/variants/${encodeURIComponent(id)}/stock-adjustments`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ delta, reason }),
+      },
+    ),
+  uploadBoutiqueMedia: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<MediaUploadResponse>('/media/upload', { method: 'POST', body: form });
+  },
 };

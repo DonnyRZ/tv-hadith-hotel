@@ -14,7 +14,15 @@ COPY . .
 RUN pnpm install --frozen-lockfile --filter @room-service/api... \
     && pnpm --filter @room-service/api build \
     && pnpm --filter @room-service/api deploy --legacy --prod --strict-peer-dependencies=false /runtime \
-    && cp -R apps/api/dist /runtime/dist
+    && if [ -f apps/api/dist/apps/api/src/main.js ]; then \
+         mkdir -p /runtime/dist \
+         && cp -R apps/api/dist/apps/api/src/. /runtime/dist/; \
+       elif [ -f apps/api/dist/main.js ]; then \
+         cp -R apps/api/dist /runtime/dist; \
+       else \
+         echo 'API build did not produce a runnable main.js' >&2 \
+         && exit 1; \
+       fi
 
 FROM node:24-bookworm-slim AS runtime
 

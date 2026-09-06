@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createReceptionistPreviewRooms,
+  emptyReceptionistFolioSummary,
   filterReceptionistRooms,
   floorForReceptionistRoomNumber,
   getReceptionistRoomsForView,
@@ -84,6 +85,7 @@ describe('Receptionist room board helpers', () => {
         checkedOutAt: null,
         assignedBy: { id: 'staff-1', displayName: 'Receptionist', role: null },
       },
+      folioSummary: emptyReceptionistFolioSummary(),
     });
 
     expect(room).toMatchObject({

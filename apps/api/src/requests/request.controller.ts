@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -17,7 +18,9 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { StaffSessionGuard } from '../auth/guards/staff-session.guard';
 import { ListDepartmentRequestsDto } from './dto/list-department-requests.dto';
 import { ListRoomManagerRequestsDto } from './dto/list-room-manager-requests.dto';
+import { CancelRequestDto } from './dto/cancel-request.dto';
 import { RequestService } from './request.service';
+import { InternalWorkerGuard } from './internal-worker.guard';
 
 @Controller('department/requests')
 @UseGuards(StaffSessionGuard, PermissionsGuard)
@@ -57,6 +60,29 @@ export class RequestController {
     @Param('requestId', new ParseUUIDPipe()) requestId: string,
   ) {
     return this.requestService.completeDepartmentRequest(staff, requestId);
+  }
+
+  @Post(':requestId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('request:cancel')
+  public cancel(
+    @CurrentStaff() staff: PublicStaffUser,
+    @Param('requestId', new ParseUUIDPipe()) requestId: string,
+    @Body() input: CancelRequestDto,
+  ) {
+    return this.requestService.cancelDepartmentRequest(staff, requestId, input.reason);
+  }
+}
+
+@Controller('internal/boutique/reservations')
+@UseGuards(InternalWorkerGuard)
+export class BoutiqueReservationExpiryController {
+  public constructor(private readonly requestService: RequestService) {}
+
+  @Post('expire')
+  @HttpCode(HttpStatus.OK)
+  public async expire() {
+    return { expired: await this.requestService.expireBoutiqueReservations() };
   }
 }
 

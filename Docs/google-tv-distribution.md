@@ -1,16 +1,18 @@
-# Google TV ADB Distribution & Signing Runbook
+# Google TV Distribution & Signing Runbook
 
-**Status:** ADB-only internal deployment; no Google distribution registration planned for MVP  
+**Status:** In-app self-update for the existing fleet; USB remains the recovery fallback
 **Deployment:** One hotel, 114 Google TV / Android TV devices  
 **Application ID:** `com.roomservice.tv`
 
 ## Locked decision
 
 Production uses one universal, signed native Android TV APK for all rooms. The
-current internal-hotel deployment uses controlled **ADB / Wireless Debugging**
-to install, update, and recover the APK. Google Play Store, private/enterprise
-app store, and Android Developer Console Full Distribution are outside the MVP.
-Therefore the current Google platform cost for deployment is US$0.
+primary update route is the app's verified HTTPS self-update flow. It avoids
+copying an APK to every TV, while Android's official installer may still ask
+for a one-time “Install unknown apps” permission and confirmation on an
+unmanaged TV. Controlled USB is the recovery fallback. Google Play Store,
+private/enterprise app store, and Android Developer Console Full Distribution
+are outside the current MVP.
 
 The repository does not create an account, make a payment, or store Google
 credentials. Full Distribution remains an optional future route only; it is not
@@ -25,16 +27,18 @@ Google TV compatibility](https://developer.android.com/training/tv/get-started/g
 
 | Route | Google platform fee | Decision for this project |
 |---|---:|---|
-| ADB / Wireless Debugging | US$0 | **Selected route** for controlled internal installation, update, and recovery |
+| In-app HTTPS self-update | US$0 | **Selected route** for normal updates; Android installer confirmation may be required |
+| USB / controlled sideload | US$0 | Recovery fallback and initial installation |
+| ADB / Wireless Debugging | US$0 | Optional technical recovery only; not the operational dependency |
 | Limited Distribution | US$0 | Not used; limited to 20 devices |
 | Full Distribution | US$25 once | Optional future route; not an MVP requirement |
 | Google Play Console | US$25 once | Optional future route; not an MVP requirement ([official fee](https://support.google.com/googleplay/android-developer/answer/6112435)) |
 
 The 20-device limit belongs to the Limited Distribution plan, not to the ADB
-workflow described by Google's documentation. Google documents ADB as remaining
-available for installing and updating unregistered apps. For this controlled
-hotel-owned fleet, ADB is the selected route; the tradeoff is deployment labor
-and the need for a disciplined device inventory. [Distribution
+workflow described by Google's documentation. ADB remains a technical recovery
+option, but the hotel fleet does not depend on it for routine updates. The
+self-update flow and its Android policy limitation are documented in
+[`tv-self-update-research.md`](tv-self-update-research.md). [Distribution
 plans](https://support.google.com/android-developer-console/answer/16640817)
 [Android Developer Verification FAQ](https://developer.android.com/developer-verification/guides/faq)
 
@@ -101,12 +105,16 @@ Set-Location apps/tv-shell
 .\gradlew.bat :app:lintDebug
 ```
 
+These commands are test-only. A debug APK must never be handed to an operator
+or installed on a pilot/production TV.
+
 Production packaging requires the local keystore and an HTTPS API endpoint:
 
 ```powershell
 .\tools\tv\package-tv.ps1 `
   -ApiBaseUrl https://api.example.com/api/v1/ `
-  -VersionCode 1 `
+  -VersionCode 6 `
+  -PreviousVersionCode 5 `
   -VersionName 0.1.0
 ```
 
@@ -122,6 +130,20 @@ checksum must be supplied to the installation script:
   -PackageName com.roomservice.tv `
   -ExpectedSha256 <SHA256-FROM-PACKAGING>
 ```
+
+## Known release signing identity
+
+This is a safe, non-secret record of the signing identity observed on the
+existing stable-package release artifact. It is useful for checking that a
+future keystore is the same key; it cannot be used to sign an APK.
+
+- Package: `com.roomservice.tv`
+- Certificate SHA-256: `50dff6906e42e0ea5ee933225fadf4a55cb9a2050baaeafa3bff8b6d90820904`
+- Certificate subject: `CN=Hadith Hotel TV, OU=IT, O=Hadith Hotel, C=UZ`
+- Private keystore status: present only in protected release custody outside
+  this workspace; it is not committed or copied into the repository.
+- Key custody: the release wrapper reads the DPAPI-protected password on the
+  owning Windows account and supplies the key only to the build process.
 
 ## ADB deployment rules for 114 TVs
 
@@ -144,7 +166,7 @@ checksum must be supplied to the installation script:
 
 ## Scope boundary
 
-This runbook prepares the application and ADB release process. It does not
+This runbook prepares the application and release process. It does not
 claim that the physical pilot has passed or that all 114 TVs are compatible.
 Those remain deployment actions owned by the hotel administrator. Full
 Distribution registration and the US$25 fee are intentionally not part of the

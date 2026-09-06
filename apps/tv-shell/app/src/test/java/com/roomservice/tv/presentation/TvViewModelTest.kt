@@ -4,6 +4,7 @@ import com.roomservice.tv.data.ClaimTvProvisioningResponse
 import com.roomservice.tv.data.CreateGuestRequest
 import com.roomservice.tv.data.DepartmentListResponse
 import com.roomservice.tv.data.GuestRequest
+import com.roomservice.tv.data.GuestRequestGroup
 import com.roomservice.tv.data.GuestRequestListResponse
 import com.roomservice.tv.data.MenuItem
 import com.roomservice.tv.data.MenuItemKind
@@ -23,11 +24,13 @@ import com.roomservice.tv.data.TvSnapshot
 import com.roomservice.tv.data.UnitCode
 import com.roomservice.tv.data.WelcomeState
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
@@ -157,6 +160,77 @@ class TvViewModelTest {
         assertEquals("Welcome, Siti Rahma", state.snapshot.context.welcome.message)
         assertNull(state.statusMessage)
     }
+
+    @Test
+    fun `refreshes requests without clearing the current cart`() = runTest {
+        val refreshedRequests = GuestRequestListResponse(
+            items = listOf(
+                GuestRequest(
+                    id = "request-2",
+                    clientRequestId = "client-2",
+                    department = "FOOD_AND_BEVERAGES",
+                    unit = UnitCode.RESTAURANT,
+                    items = listOf(
+                        RequestItem(
+                            menuItemId = "menu-1",
+                            unit = UnitCode.RESTAURANT,
+                            kind = MenuItemKind.PRODUCT,
+                            name = "Nasi Goreng",
+                            quantity = 1,
+                        ),
+                    ),
+                    status = RequestStatus.IN_PROCESS,
+                    requestedAt = "2026-08-29T10:00:00Z",
+                ),
+            ),
+            page = 1,
+            pageSize = 25,
+            total = 1,
+        )
+        val repository = FakeTvRepository(
+            initialCredential = "existing-credential",
+            refreshRequestsValue = refreshedRequests,
+        )
+        val viewModel = TvViewModel(repository, FakeRealtimeConnection())
+
+        viewModel.initialize()
+        advanceUntilIdle()
+        viewModel.addToCart(sampleMenuItem())
+        viewModel.refreshRequests()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value as TvUiState.Ready
+        assertEquals(refreshedRequests, state.snapshot.guestData!!.requests)
+        assertEquals(1, state.cart.size)
+    }
+
+    @Test
+    fun `ignores cart mutations while a request is in flight`() = runTest {
+        val submissionGate = CompletableDeferred<Unit>()
+        val repository = FakeTvRepository(
+            initialCredential = "existing-credential",
+            submissionGate = submissionGate,
+        )
+        val viewModel = TvViewModel(repository, FakeRealtimeConnection())
+        viewModel.initialize()
+        advanceUntilIdle()
+
+        val item = sampleMenuItem()
+        viewModel.addToCart(item)
+        viewModel.submitCart()
+        runCurrent()
+
+        val submitting = viewModel.uiState.value as TvUiState.Ready
+        assertTrue(submitting.isSubmitting)
+        viewModel.addToCart(item)
+        viewModel.removeFromCart(item.id)
+
+        val unchanged = viewModel.uiState.value as TvUiState.Ready
+        assertEquals(1, unchanged.cart.single().quantity)
+
+        submissionGate.complete(Unit)
+        advanceUntilIdle()
+    }
 }
 
 private class FakeRealtimeConnection : TvRealtimeConnection {
@@ -178,6 +252,8 @@ private class FakeTvRepository(
     initialCredential: String?,
     private val snapshotFailures: MutableList<Exception> = mutableListOf(),
     private val refreshContextValue: TvContext = sampleSnapshot().context,
+    private val refreshRequestsValue: GuestRequestListResponse = sampleSnapshot().guestData!!.requests,
+    private val submissionGate: CompletableDeferred<Unit>? = null,
 ) : TvRepository {
     private var credential: String? = initialCredential
     private var loadSnapshotCount: Int = 0
@@ -226,9 +302,12 @@ private class FakeTvRepository(
         }
     }
 
+    override suspend fun loadRequests(): GuestRequestListResponse = refreshRequestsValue
+
     override suspend fun refreshContext(): TvContext = refreshContextValue
 
     override suspend fun submitRequest(request: CreateGuestRequest): GuestRequest {
+        submissionGate?.await()
         submittedRequestCount += 1
         return GuestRequest(
             id = "request-1",
@@ -246,6 +325,13 @@ private class FakeTvRepository(
             ),
             status = RequestStatus.NEW,
             requestedAt = "2026-08-29T10:00:00Z",
+        )
+    }
+
+    override suspend fun submitRequestGroup(request: CreateGuestRequest): GuestRequestGroup {
+        return GuestRequestGroup(
+            clientRequestId = request.clientRequestId,
+            requests = listOf(submitRequest(request)),
         )
     }
 }

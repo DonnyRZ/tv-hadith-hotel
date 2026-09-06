@@ -1,3 +1,5 @@
+import java.net.URI
+import java.util.Locale
 import java.util.Properties
 
 plugins {
@@ -6,10 +8,28 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-val configuredApiBaseUrl = providers.gradleProperty("tvApiBaseUrl")
-    .orElse("http://10.0.2.2:3000/api/v1/")
-    .get()
-    .let { if (it.endsWith("/")) it else "$it/" }
+fun configuredValue(propertyName: String, environmentName: String, fallback: String = ""): String =
+    providers.gradleProperty(propertyName)
+        .orElse(providers.environmentVariable(environmentName))
+        .orElse(fallback)
+        .get()
+        .trim()
+
+val configuredApiBaseUrl = configuredValue("tvApiBaseUrl", "TV_API_BASE_URL")
+    .let { value ->
+        when {
+            value.isEmpty() -> value
+            value.endsWith("/") -> value
+            else -> "$value/"
+        }
+    }
+
+val configuredTvTarget = configuredValue("tvTarget", "TV_TARGET", "physical")
+    .lowercase(Locale.ROOT)
+    .ifEmpty { "physical" }
+
+fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 val configuredVersionCode = providers.gradleProperty("tvVersionCode")
     .orElse("1")
@@ -67,7 +87,8 @@ android {
         versionCode = configuredVersionCode
         versionName = configuredVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "API_BASE_URL", "\"$configuredApiBaseUrl\"")
+        buildConfigField("String", "API_BASE_URL", buildConfigString(configuredApiBaseUrl))
+        buildConfigField("String", "API_TARGET", buildConfigString(configuredTvTarget))
     }
 
     signingConfigs {
@@ -119,18 +140,62 @@ android {
     }
 }
 
+fun validateApiConfiguration(isRelease: Boolean) {
+    if (configuredApiBaseUrl.isBlank()) {
+        throw GradleException(
+            "TV API URL is required for every build. Pass -PtvApiBaseUrl=<URL>/api/v1/ " +
+                "or set TV_API_BASE_URL. Never rely on an implicit emulator URL.",
+        )
+    }
+
+    if (configuredTvTarget !in setOf("physical", "emulator")) {
+        throw GradleException("tvTarget must be either 'physical' or 'emulator'.")
+    }
+
+    val apiUri = try {
+        URI(configuredApiBaseUrl)
+    } catch (exception: Exception) {
+        throw GradleException("tvApiBaseUrl must be a valid absolute HTTP(S) URL.", exception)
+    }
+    val scheme = apiUri.scheme?.lowercase(Locale.ROOT)
+    val host = apiUri.host?.lowercase(Locale.ROOT)
+    if (!apiUri.isAbsolute || host.isNullOrBlank() || scheme !in setOf("http", "https")) {
+        throw GradleException("tvApiBaseUrl must be a valid absolute HTTP(S) URL.")
+    }
+    if (apiUri.userInfo != null || apiUri.rawQuery != null || apiUri.rawFragment != null) {
+        throw GradleException("tvApiBaseUrl must not contain credentials, query parameters, or fragments.")
+    }
+    if (apiUri.path?.trimEnd('/') != "/api/v1") {
+        throw GradleException("tvApiBaseUrl must end with /api/v1/.")
+    }
+
+    val emulatorOrLoopbackHost = host in setOf("localhost", "127.0.0.1", "::1", "10.0.2.2", "10.0.3.2")
+    if (configuredTvTarget == "physical" && emulatorOrLoopbackHost) {
+        throw GradleException(
+            "Physical TV builds cannot target $host. Use the laptop LAN IP for a local API " +
+                "or an HTTPS deployed API. Use tvTarget=emulator only for an Android emulator.",
+        )
+    }
+    if (isRelease) {
+        if (configuredTvTarget != "physical") {
+            throw GradleException("Release builds must use tvTarget=physical.")
+        }
+        if (scheme != "https") {
+            throw GradleException("Release builds require an HTTPS tvApiBaseUrl.")
+        }
+        val isIpv4Literal = host.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$"))
+        if (isIpv4Literal || host.endsWith(".local")) {
+            throw GradleException("Release builds must target a deployed production hostname, not a laptop/IP/.local host.")
+        }
+    }
+}
+
 fun validateReleaseConfiguration() {
+    validateApiConfiguration(isRelease = true)
     if (!hasReleaseSigning) {
         throw GradleException(
             "Release builds must be signed. Provide apps/tv-shell/signing.properties " +
                 "or all TV_SIGNING_* environment variables with a real keystore outside source control.",
-        )
-    }
-
-    if (!configuredApiBaseUrl.startsWith("https://", ignoreCase = true)) {
-        throw GradleException(
-            "Release builds require an HTTPS tvApiBaseUrl. " +
-                "Pass -PtvApiBaseUrl=https://.../api/v1/.",
         )
     }
 
@@ -141,9 +206,23 @@ fun validateReleaseConfiguration() {
 }
 
 tasks.matching { task ->
-    task.name == "preReleaseBuild" || task.name == "assembleRelease" || task.name == "bundleRelease"
+    task.name in setOf(
+        "preDebugBuild",
+        "assembleDebug",
+        "installDebug",
+        "connectedDebugAndroidTest",
+        "preReleaseBuild",
+        "assembleRelease",
+        "bundleRelease",
+    )
 }.configureEach {
-    doFirst { validateReleaseConfiguration() }
+    doFirst {
+        if (name.contains("Release", ignoreCase = true)) {
+            validateReleaseConfiguration()
+        } else {
+            validateApiConfiguration(isRelease = false)
+        }
+    }
 }
 
 dependencies {

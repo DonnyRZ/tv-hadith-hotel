@@ -19,6 +19,9 @@ interface TvApi {
     @GET("tv/context")
     suspend fun getTvContext(): TvContext
 
+    @GET("tv/update-manifest")
+    suspend fun getUpdateManifest(): TvUpdateManifest
+
     @GET("guest/departments")
     suspend fun getDepartments(): DepartmentListResponse
 
@@ -36,4 +39,9 @@ interface TvApi {
     suspend fun createRequest(
         @Body request: CreateGuestRequest,
     ): GuestRequest
+
+    @POST("guest/request-groups")
+    suspend fun createRequestGroup(
+        @Body request: CreateGuestRequest,
+    ): GuestRequestGroup
 }

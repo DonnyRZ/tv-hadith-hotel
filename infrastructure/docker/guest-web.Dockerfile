@@ -20,6 +20,7 @@ RUN pnpm install --frozen-lockfile --filter @room-service/guest-web... \
 FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
+ENV REQUIRE_API_PROXY=true
 
 WORKDIR /app
 

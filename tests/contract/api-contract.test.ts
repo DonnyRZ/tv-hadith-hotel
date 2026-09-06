@@ -74,6 +74,15 @@ describe('REST API contract scenarios', () => {
 
     expect(health.security).toEqual([]);
     expect(health.responses).toHaveProperty('200');
+    expect(schema('ApiError').required).toEqual([
+      'statusCode',
+      'code',
+      'message',
+      'requestId',
+      'environment',
+      'releaseId',
+      'timestamp',
+    ]);
   });
 
   it('defines the staff session lifecycle and session cookie contract', () => {
@@ -118,6 +127,7 @@ describe('REST API contract scenarios', () => {
       'HOUSEKEEPING',
       'BEAUTY_AND_SALON',
       'CAFE',
+      'BUTIK_INDONESIA',
     ]);
     expect(schema('StaffUser').required).toEqual(['id', 'displayName', 'roles', 'permissions']);
   });
@@ -262,7 +272,8 @@ describe('REST API contract scenarios', () => {
 
     expect(schema('MenuItem').required).toContain('sortOrder');
     expect(schema('MenuItem').required).not.toContain('category');
-    expect(schema('MenuItem').properties).not.toHaveProperty('category');
+    expect(schema('MenuItem').properties).toHaveProperty('category');
+    expect(schema('MenuItem').properties).toHaveProperty('variants');
     expect(schema('CreateMenuItemRequest').required).toEqual(['unit', 'kind', 'localizedName']);
     expect(schema('CreateMenuItemRequest').properties?.localizedName).toMatchObject({
       $ref: '#/components/schemas/LocalizedText',
@@ -326,6 +337,10 @@ describe('REST API contract scenarios', () => {
     expect(schema('PairTvDeviceRequest').properties?.pairingCode).toMatchObject({
       pattern: '^[0-9]{6}$',
     });
+    expect(schema('TvContext').properties?.stay).toMatchObject({
+      nullable: true,
+      allOf: [{ $ref: '#/components/schemas/GuestStay' }],
+    });
     expect(schema('ResetTvDeviceResponse').required).toEqual([
       'deviceId',
       'status',
@@ -377,6 +392,13 @@ describe('REST API contract scenarios', () => {
     expect(schema('RequestItem').required).toContain('currency');
     expect(schema('RequestItem').properties).not.toHaveProperty('lineTotal');
     expect(schema('CreateGuestRequest').properties).not.toHaveProperty('roomId');
+    expect(schema('GuestContext').required).toContain('stay');
+    expect(schema('GuestStay').required).toEqual([
+      'checkInAt',
+      'checkOutAt',
+      'totalDays',
+      'timeZone',
+    ]);
     expect(schema('GuestContext').required).toContain('availableUnits');
   });
 
@@ -394,7 +416,7 @@ describe('REST API contract scenarios', () => {
 
     expect(confirm.responses).toHaveProperty('409');
     expect(done.responses).toHaveProperty('409');
-    expect(schema('RequestStatus').enum).toEqual(['NEW', 'IN_PROCESS', 'COMPLETED']);
+    expect(schema('RequestStatus').enum).toEqual(['NEW', 'IN_PROCESS', 'COMPLETED', 'CANCELLED']);
     expect(schema('StaffRequest').allOf?.some((part) => part.required?.includes('room'))).toBe(
       true,
     );

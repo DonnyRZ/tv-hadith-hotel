@@ -30,8 +30,10 @@ interface TvRepository {
     suspend fun saveCredential(credential: String)
     suspend fun clearCredential()
     suspend fun loadSnapshot(): TvSnapshot
+    suspend fun loadRequests(): GuestRequestListResponse
     suspend fun refreshContext(): TvContext
     suspend fun submitRequest(request: CreateGuestRequest): GuestRequest
+    suspend fun submitRequestGroup(request: CreateGuestRequest): GuestRequestGroup
 }
 
 class DefaultTvRepository(
@@ -122,8 +124,13 @@ class DefaultTvRepository(
 
     override suspend fun refreshContext(): TvContext = call { api.getTvContext() }
 
+    override suspend fun loadRequests(): GuestRequestListResponse = call { api.getRequests() }
+
     override suspend fun submitRequest(request: CreateGuestRequest): GuestRequest =
         call { api.createRequest(request) }
+
+    override suspend fun submitRequestGroup(request: CreateGuestRequest): GuestRequestGroup =
+        call { api.createRequestGroup(request) }
 
     private suspend fun <T> call(block: suspend () -> T): T = try {
         block()

@@ -59,7 +59,7 @@ export const SYSTEM_ROLE_METADATA: Readonly<
   },
   RECEPTIONIST: {
     name: 'Receptionist',
-    description: 'Manages guest-room assignment, checkout, and TV pairing.',
+    description: 'Manages guest-room assignment, checkout, TV pairing, and Housekeeping requests.',
   },
   SPA: {
     name: 'SPA',
@@ -84,6 +84,10 @@ export const SYSTEM_ROLE_METADATA: Readonly<
   CAFE: {
     name: 'Cafe',
     description: 'Handles cafe service requests and menu operations.',
+  },
+  BUTIK_INDONESIA: {
+    name: 'Butik Indonesia',
+    description: 'Handles Butik Indonesia orders, catalog, stock, and product media.',
   },
 };
 
@@ -343,7 +347,13 @@ export class PostgresStaffRoleRepository implements StaffRoleRepository, OnModul
         `
           INSERT INTO staff_roles (id, code, name, description, is_system, permissions, created_at, updated_at)
           VALUES ($1, $2, $3, $4, true, $5, $6, $6)
-          ON CONFLICT (code) DO NOTHING
+          ON CONFLICT (code) DO UPDATE
+          SET name = EXCLUDED.name,
+              description = EXCLUDED.description,
+              is_system = true,
+              permissions = EXCLUDED.permissions,
+              updated_at = EXCLUDED.updated_at
+          WHERE staff_roles.is_system = true
         `,
         [randomUUID(), role.code, role.name, role.description, role.permissions, role.createdAt],
       );

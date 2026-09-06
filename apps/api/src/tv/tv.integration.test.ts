@@ -23,6 +23,26 @@ describe('Smart TV provisioning API', () => {
     await app.close();
   });
 
+  it('exposes a safe disabled update manifest before the feed is configured', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/tv/update-manifest')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      enabled: false,
+      packageName: 'com.roomservice.tv',
+      latestVersionCode: 0,
+      latestVersionName: null,
+      apkUrl: null,
+      sha256: null,
+      certificateSha256: null,
+      releaseId: 'local',
+      mandatory: false,
+      minSupportedVersionCode: null,
+    });
+    expect(response.headers['cache-control']).toBe('no-store');
+  });
+
   it('creates a short-lived one-time pairing code without accepting a room number', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/v1/tv/provisioning/start')
@@ -115,6 +135,7 @@ describe('Smart TV provisioning API', () => {
       welcome: {
         personalized: false,
       },
+      stay: null,
     });
   });
 

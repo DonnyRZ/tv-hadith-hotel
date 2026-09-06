@@ -3,7 +3,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
 import type { TvDeviceRepository } from './tv-device.repository';
-import { TvDeviceRoomConflictError } from './tv-device.repository';
+import {
+  TvDevicePairingAlreadyUsedError,
+  TvDevicePairingCodeChangedError,
+  TvDevicePairingExpiredError,
+  TvDeviceRoomConflictError,
+} from './tv-device.repository';
 import type {
   CreatedTvDevice,
   ListTvDevicesInput,
@@ -140,7 +145,13 @@ export class InMemoryTvDeviceRepository implements TvDeviceRepository {
       throw new NotFoundException('TV device does not exist.');
     }
     if (record.status !== 'PENDING') {
-      throw new ConflictException('TV pairing code has already been used.');
+      throw new TvDevicePairingAlreadyUsedError();
+    }
+    if (record.pairingCodeHash !== hashTvSecret(input.pairingCode)) {
+      throw new TvDevicePairingCodeChangedError();
+    }
+    if (Date.parse(record.pairingExpiresAt) <= Date.now()) {
+      throw new TvDevicePairingExpiredError();
     }
 
     if (

@@ -1,8 +1,11 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common';
 
 import { ApiException } from '../auth/api-exception';
 import type { PublicStaffUser } from '../auth/auth.types';
+import { BoutiqueService } from '../boutique/boutique.service';
+import type { StockReservationLine } from '../boutique/boutique.types';
 import { getAccessibleUnits, isRoleCode, type UnitCode } from '../rbac/rbac.types';
+import { StaffRealtimePublisher } from '../realtime/staff-realtime.publisher';
 import type { ListDepartmentRequestsDto } from './dto/list-department-requests.dto';
 import type { ListRoomManagerRequestsDto } from './dto/list-room-manager-requests.dto';
 import { REQUEST_REPOSITORY } from './request.repository';
@@ -20,7 +23,11 @@ const DEFAULT_PAGE_SIZE = 25;
 
 @Injectable()
 export class RequestService {
-  public constructor(@Inject(REQUEST_REPOSITORY) private readonly repository: RequestRepository) {}
+  public constructor(
+    @Inject(REQUEST_REPOSITORY) private readonly repository: RequestRepository,
+    private readonly boutiqueService: BoutiqueService,
+    @Optional() private readonly realtimePublisher?: StaffRealtimePublisher,
+  ) {}
 
   public async listDepartmentRequests(staff: PublicStaffUser, query: ListDepartmentRequestsDto) {
     const units = this.resolveUnits(staff, query.unit);
@@ -96,6 +103,46 @@ export class RequestService {
     return this.transition(staff, requestId, 'IN_PROCESS', 'COMPLETED');
   }
 
+  public async cancelDepartmentRequest(
+    staff: PublicStaffUser,
+    requestId: string,
+    reason?: string | null,
+  ): Promise<RequestRecord> {
+    const request = await this.requireRequestInScope(staff, requestId);
+    if (request.status === 'COMPLETED' || request.status === 'CANCELLED') {
+      throw new ApiException(HttpStatus.CONFLICT, {
+        code: 'REQUEST_STATUS_CONFLICT',
+        message: 'The request is already in a terminal state.',
+      });
+    }
+    return this.cancelRequestRecord(
+      request,
+      this.toActor(staff),
+      reason?.trim() || 'Cancelled by the Butik Indonesia team.',
+      'STAFF',
+    );
+  }
+
+  public async expireBoutiqueReservations(): Promise<number> {
+    const expired = await this.repository.listExpiredReservations(new Date().toISOString());
+    let expiredCount = 0;
+    for (const request of expired) {
+      try {
+        await this.cancelRequestRecord(
+          request,
+          { id: 'system', displayName: 'Reservation expiry', role: null },
+          'Reservation expired after 30 minutes.',
+          'AUTO_EXPIRY',
+        );
+        expiredCount += 1;
+      } catch (error) {
+        if (!(error instanceof ApiException) || error.getStatus() !== HttpStatus.CONFLICT)
+          throw error;
+      }
+    }
+    return expiredCount;
+  }
+
   private async transition(
     staff: PublicStaffUser,
     requestId: string,
@@ -104,6 +151,36 @@ export class RequestService {
   ): Promise<RequestRecord> {
     const request = await this.requireRequestInScope(staff, requestId);
     const changedBy = this.toActor(staff);
+    const stockLines = this.stockLines(request);
+    if (nextStatus === 'COMPLETED') {
+      // Claim the terminal state before touching inventory. This prevents a
+      // concurrent cancellation from winning after fulfillment has already
+      // reduced stock. If fulfillment fails, the claim is reverted and the
+      // reservation remains available for a retry.
+      const claimed = await this.repository.transition(
+        request.id,
+        expectedStatus,
+        nextStatus,
+        changedBy,
+      );
+      if (claimed === null) {
+        throw new ApiException(HttpStatus.CONFLICT, {
+          code: 'REQUEST_STATUS_CONFLICT',
+          message: `The request cannot be changed from ${expectedStatus}.`,
+        });
+      }
+      try {
+        if (stockLines.length > 0) {
+          await this.boutiqueService.fulfillStock(stockLines, request.clientRequestId);
+        }
+        this.realtimePublisher?.publishRequestUpdated(claimed);
+        return claimed;
+      } catch (error) {
+        await this.repository.revertCompletion(request.id, changedBy);
+        throw error;
+      }
+    }
+
     const updated = await this.repository.transition(
       request.id,
       expectedStatus,
@@ -118,7 +195,49 @@ export class RequestService {
       });
     }
 
+    this.realtimePublisher?.publishRequestUpdated(updated);
     return updated;
+  }
+
+  private async cancelRequestRecord(
+    request: RequestRecord,
+    changedBy: RequestActor,
+    reason: string,
+    source: 'STAFF' | 'AUTO_EXPIRY',
+  ): Promise<RequestRecord> {
+    const stockLines = this.stockLines(request);
+    const updated = await this.repository.transition(
+      request.id,
+      request.status,
+      'CANCELLED',
+      changedBy,
+      { cancellationReason: reason, cancellationSource: source },
+    );
+    if (updated === null) {
+      throw new ApiException(HttpStatus.CONFLICT, {
+        code: 'REQUEST_STATUS_CONFLICT',
+        message: 'The request changed before it could be cancelled.',
+      });
+    }
+
+    // The conditional status transition is the cancellation claim. Only the
+    // caller that won it may release stock; concurrent confirm/expiry attempts
+    // cannot release the same reservation after the request has moved on.
+    if (stockLines.length > 0) {
+      await this.boutiqueService.releaseStock(stockLines, request.clientRequestId);
+    }
+    this.realtimePublisher?.publishRequestUpdated(updated);
+    return updated;
+  }
+
+  private stockLines(request: RequestRecord): StockReservationLine[] {
+    if (request.unit !== 'BUTIK_INDONESIA') return [];
+    const quantities = new Map<string, number>();
+    for (const item of request.items) {
+      if (item.variantId === undefined || item.variantId === null) continue;
+      quantities.set(item.variantId, (quantities.get(item.variantId) ?? 0) + item.quantity);
+    }
+    return [...quantities.entries()].map(([variantId, quantity]) => ({ variantId, quantity }));
   }
 
   private async requireRequestInScope(

@@ -19,6 +19,7 @@ import {
   type ReceptionistRoomView,
   type RoomStatus,
   type StaffActor,
+  emptyReceptionistFolioSummary,
 } from './receptionist.types';
 
 export const RECEPTIONIST_REPOSITORY = Symbol('RECEPTIONIST_REPOSITORY');
@@ -58,6 +59,15 @@ export interface ReceptionistRepository {
   }>;
   findRoom(id: string): Promise<ReceptionistRoomView | null>;
   findActiveAssignmentByRoomId(roomId: string): Promise<GuestAssignmentRecord | null>;
+  listGuestAssignmentsByRoomId(
+    roomId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: GuestAssignmentRecord[]; total: number }>;
+  findGuestAssignmentByRoomId(
+    roomId: string,
+    assignmentId: string,
+  ): Promise<GuestAssignmentRecord | null>;
   assignGuest(
     roomId: string,
     guestName: string,
@@ -88,6 +98,7 @@ function createRoomView(
     room: { id: room.id, number: room.number },
     roomStatus: roomStatus(activeAssignment),
     activeAssignment,
+    folioSummary: emptyReceptionistFolioSummary(),
   };
 }
 
@@ -131,6 +142,34 @@ export class InMemoryReceptionistRepository implements ReceptionistRepository {
   public async findActiveAssignmentByRoomId(roomId: string): Promise<GuestAssignmentRecord | null> {
     const assignment = this.findActiveAssignmentRecordByRoomId(roomId);
     return assignment === null ? null : cloneAssignment(assignment);
+  }
+
+  public async listGuestAssignmentsByRoomId(
+    roomId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: GuestAssignmentRecord[]; total: number }> {
+    if (!this.rooms.has(roomId)) throw new RoomNotFoundError();
+    const assignments = [...this.assignments.values()]
+      .filter((assignment) => assignment.room.id === roomId && assignment.status === 'CHECKED_OUT')
+      .sort(
+        (left, right) =>
+          right.assignedAt.localeCompare(left.assignedAt) || right.id.localeCompare(left.id),
+      );
+    const offset = (page - 1) * pageSize;
+    return {
+      items: assignments.slice(offset, offset + pageSize).map(cloneAssignment),
+      total: assignments.length,
+    };
+  }
+
+  public async findGuestAssignmentByRoomId(
+    roomId: string,
+    assignmentId: string,
+  ): Promise<GuestAssignmentRecord | null> {
+    const assignment = this.assignments.get(assignmentId);
+    if (assignment === undefined || assignment.room.id !== roomId) return null;
+    return cloneAssignment(assignment);
   }
 
   public async assignGuest(
@@ -358,6 +397,70 @@ export class PostgresReceptionistRepository implements ReceptionistRepository, O
         LIMIT 1
       `,
       [roomId],
+    );
+    return result.rows[0] === undefined ? null : this.toAssignment(result.rows[0]);
+  }
+
+  public async listGuestAssignmentsByRoomId(
+    roomId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: GuestAssignmentRecord[]; total: number }> {
+    await this.ensureInitialized();
+    const result = await this.pool.query<AssignmentRow & { total_count?: number | string }>(
+      `
+        SELECT a.id,
+               a.room_id,
+               r.room_number,
+               a.guest_name,
+               a.stay_days,
+               a.status,
+               a.assigned_at,
+               a.updated_at,
+               a.checked_out_at,
+               a.assigned_by_id,
+               a.assigned_by_name,
+               a.assigned_by_role,
+               COUNT(*) OVER() AS total_count
+        FROM guest_room_assignments a
+        JOIN hotel_rooms r ON r.id = a.room_id
+        WHERE a.room_id = $1::uuid AND a.status = 'CHECKED_OUT'
+        ORDER BY a.assigned_at DESC, a.id DESC
+        LIMIT $2 OFFSET $3
+      `,
+      [roomId, pageSize, (page - 1) * pageSize],
+    );
+    return {
+      items: result.rows.map((row) => this.toAssignment(row)),
+      total: result.rows[0] === undefined ? 0 : Number(result.rows[0].total_count ?? 0),
+    };
+  }
+
+  public async findGuestAssignmentByRoomId(
+    roomId: string,
+    assignmentId: string,
+  ): Promise<GuestAssignmentRecord | null> {
+    await this.ensureInitialized();
+    const result = await this.pool.query<AssignmentRow>(
+      `
+        SELECT a.id,
+               a.room_id,
+               r.room_number,
+               a.guest_name,
+               a.stay_days,
+               a.status,
+               a.assigned_at,
+               a.updated_at,
+               a.checked_out_at,
+               a.assigned_by_id,
+               a.assigned_by_name,
+               a.assigned_by_role
+        FROM guest_room_assignments a
+        JOIN hotel_rooms r ON r.id = a.room_id
+        WHERE a.room_id = $1::uuid AND a.id = $2::uuid
+        LIMIT 1
+      `,
+      [roomId, assignmentId],
     );
     return result.rows[0] === undefined ? null : this.toAssignment(result.rows[0]);
   }
@@ -620,6 +723,7 @@ export class PostgresReceptionistRepository implements ReceptionistRepository, O
       room: { id: row.room_id, number: row.room_number },
       roomStatus: roomStatus(assignment),
       activeAssignment: assignment,
+      folioSummary: emptyReceptionistFolioSummary(),
     };
   }
 

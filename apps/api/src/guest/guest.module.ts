@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
+import { BoutiqueModule } from '../boutique/boutique.module';
 import { MenuModule } from '../menu/menu.module';
 import { ReceptionistModule } from '../receptionist/receptionist.module';
 import { RequestModule } from '../requests/request.module';
@@ -19,7 +20,15 @@ import { GuestQrService } from './guest-qr.service';
 import { GuestService } from './guest.service';
 
 @Module({
-  imports: [ConfigModule, AuthModule, MenuModule, ReceptionistModule, RequestModule, TvModule],
+  imports: [
+    ConfigModule,
+    AuthModule,
+    BoutiqueModule,
+    MenuModule,
+    ReceptionistModule,
+    RequestModule,
+    TvModule,
+  ],
   controllers: [GuestController, GuestQrController, GuestQrBatchController],
   providers: [
     {

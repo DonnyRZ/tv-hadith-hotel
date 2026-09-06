@@ -34,6 +34,28 @@ services:
       - '${MINIO_CONSOLE_PORT:-9001}:9001'
     volumes:
       - minio-data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mc ready local
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    restart: unless-stopped
+    command: redis-server --appendonly no
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   prometheus:
     image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3}

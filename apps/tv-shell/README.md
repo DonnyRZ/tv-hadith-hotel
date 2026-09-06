@@ -5,13 +5,26 @@ app using Jetpack Compose for TV; the TV runtime does not use WebView, React, or
 the mobile PWA.
 
 The deployment target is 114 hotel TVs. The current production decision is one
-universal signed APK installed through controlled ADB / Wireless Debugging. The
-hotel is not planning to use Google Play Store, a private enterprise app store,
-or Android Developer Console Full Distribution for the MVP, so no US$25
-registration is required for this deployment path. Full Distribution remains
-an optional future change, not a runtime dependency.
+universal signed APK updated through the in-app verified HTTPS updater. Android
+may require a one-time install permission and confirmation on an unmanaged TV;
+controlled USB remains the recovery fallback. The hotel is not planning to use
+Google Play Store, a private enterprise app store, or Android Developer Console
+Full Distribution for the MVP, so no US$25 registration is required for this
+deployment path. Full Distribution remains an optional future change, not a
+runtime dependency.
 See [`Docs/google-tv-distribution.md`](../../Docs/google-tv-distribution.md) for
-the ADB-only release and deployment runbook.
+the distribution background. The mandatory operational references are
+[`runtime-environment-contract.md`](../../Docs/runtime-environment-contract.md),
+[`tv-pairing-runbook.md`](../../Docs/tv-pairing-runbook.md),
+[`tv-pairing-troubleshooting.md`](../../Docs/tv-pairing-troubleshooting.md),
+and [`tv-release-checklist.md`](../../Docs/tv-release-checklist.md).
+The day-to-day APK policy is in
+[`tv-apk-best-practices.md`](../../Docs/tv-apk-best-practices.md).
+The self-update decision and publish procedure are in
+[`tv-self-update-research.md`](../../Docs/tv-self-update-research.md) and
+[`tv-self-update-runbook.md`](../../Docs/tv-self-update-runbook.md).
+The automated signed-release pipeline is defined in
+[`tv-release-automation.md`](../../Docs/tv-release-automation.md).
 
 ## Architecture
 
@@ -20,18 +33,31 @@ the ADB-only release and deployment runbook.
 - Network: Retrofit/OkHttp for REST and Socket.IO for room assignment updates.
 - Device identity: one-time pairing code, then an Android Keystore-protected
   device credential.
-- API base URL: `http://10.0.2.2:3000/api/v1/` by default for the Android
-  emulator. Override it with `-PtvApiBaseUrl=https://host/api/v1/`.
+- API base URL is mandatory for every build; there is no implicit default. For
+  an Android emulator, explicitly use `-PtvTarget=emulator
+-PtvApiBaseUrl=http://10.0.2.2:3000/api/v1/`. For a physical TV, use the
+  laptop LAN address or a deployed HTTPS API and `-PtvTarget=physical`.
 
-## Development
+## Development and test-only builds
 
-Use Android Studio with Java 17 and the Android TV Emulator, or run the Gradle
-wrapper from this directory:
+Use Android Studio with Java 17 and the Android TV Emulator for test-only
+builds. Debug APKs are never installed as the pilot or distributed to
+operators.
 
 ```powershell
-.\gradlew.bat :app:assembleDebug
-.\gradlew.bat :app:testDebugUnitTest
-.\gradlew.bat :app:lintDebug
+Set-Location ../..
+.\tools\tv\build-debug-tv.ps1 `
+  -ApiBaseUrl http://<laptop-lan-ip>:3000/api/v1/ `
+  -Target physical
+```
+
+For emulator-only development, use the explicit emulator target:
+
+```powershell
+Set-Location apps/tv-shell
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug `
+  -PtvTarget=emulator `
+  -PtvApiBaseUrl=http://10.0.2.2:3000/api/v1/
 ```
 
 Release builds require `signing.properties` or all of the ephemeral
@@ -46,7 +72,8 @@ For a release artifact, run the repository-root packaging script:
 ```powershell
 .\tools\tv\package-tv.ps1 `
   -ApiBaseUrl https://api.example.com/api/v1/ `
-  -VersionCode 1 `
+  -VersionCode 6 `
+  -PreviousVersionCode 5 `
   -VersionName 0.1.0
 ```
 
@@ -54,29 +81,31 @@ The generated certificate fingerprint is the signing identity to retain for
 future updates and, when requested by the distribution registration flow, to
 associate with the package. No key or payment secret belongs in the repository.
 
-## Install on a TV
+For the normal release path, do not run this command manually. Create a
+protected tag such as `tv-v0.4.8-code12` and let the `EGI TV Release` GitHub
+Actions workflow build and verify the signed artifact. The manual command is a
+recovery path only; see [`tv-release-automation.md`](../../Docs/tv-release-automation.md).
 
-Enable Developer Options and Wireless Debugging on the pilot TV, then run the
-installer from the repository root:
+## Install the signed release on a TV
+
+Enable Developer Options and Wireless Debugging on the pilot TV, then install
+only the signed release artifact from the repository root. Follow the
+preflight and operator steps in `Docs/tv-pairing-runbook.md` first. The
+installer must use package `com.roomservice.tv` and the SHA-256 from the
+release manifest.
+
+For Android TV Wireless Debugging, use the pairing endpoint and code shown by
+the TV, then use the separate connect port shown after pairing:
 
 ```powershell
 .\tools\tv\install-tv.ps1 `
-  -ApkPath .\apps\tv-shell\app\build\outputs\apk\debug\app-debug.apk `
-  -DeviceAddress 192.168.1.50 `
-  -PackageName com.roomservice.tv.debug
-```
-
-For Android TV Wireless Debugging pairing, use the pairing endpoint and code
-shown by the TV, then use the separate connect port shown after pairing:
-
-```powershell
-.\tools\tv\install-tv.ps1 `
-  -ApkPath .\apps\tv-shell\app\build\outputs\apk\debug\app-debug.apk `
+  -ApkPath .\apps\tv-shell\app\build\outputs\apk\release\app-release.apk `
   -DeviceAddress 192.168.1.50 `
   -Port 42137 `
   -PairingAddress 192.168.1.50:37123 `
   -PairingCode 123456 `
-  -PackageName com.roomservice.tv.debug
+  -PackageName com.roomservice.tv `
+  -ExpectedSha256 <SHA256-FROM-MANIFEST>
 ```
 
 The pairing port and connect port are displayed by the TV and may change; port

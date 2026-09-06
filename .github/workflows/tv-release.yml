@@ -1,0 +1,514 @@
+name: EGI TV Release
+
+on:
+  push:
+    tags:
+      - 'tv-v*-code*'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Release version name, for example 0.4.8'
+        required: true
+        type: string
+      version_code:
+        description: 'Monotonically increasing Android version code'
+        required: true
+        type: string
+      previous_version_code:
+        description: 'Highest version code currently installed in production'
+        required: true
+        type: string
+      bootstrap_only:
+        description: 'Build a signed bootstrap APK without publishing an update feed'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: egi-tv-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate-source:
+    name: Validate release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          cache: pnpm
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate source
+        run: pnpm validate
+
+  build-release:
+    name: Build and verify signed release
+    needs: validate-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: tv-release
+    outputs:
+      artifact_name: ${{ steps.resolve.outputs.artifact_name }}
+      version_code: ${{ steps.resolve.outputs.version_code }}
+      version_name: ${{ steps.resolve.outputs.version_name }}
+      update_apk_url: ${{ steps.resolve.outputs.update_apk_url }}
+      autopublish: ${{ steps.resolve.outputs.autopublish }}
+      object_prefix: ${{ steps.resolve.outputs.object_prefix }}
+
+    env:
+      RELEASE_EVENT: ${{ github.event_name }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      INPUT_VERSION_NAME: ${{ inputs.version_name }}
+      INPUT_VERSION_CODE: ${{ inputs.version_code }}
+      INPUT_PREVIOUS_VERSION_CODE: ${{ inputs.previous_version_code }}
+      INPUT_BOOTSTRAP_ONLY: ${{ inputs.bootstrap_only }}
+      TV_INITIAL_PRODUCTION_VERSION_CODE: ${{ vars.TV_INITIAL_PRODUCTION_VERSION_CODE || '11' }}
+      TV_PRODUCTION_API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
+      TV_UPDATE_PUBLIC_BASE_URL: ${{ vars.TV_UPDATE_PUBLIC_BASE_URL || '' }}
+      TV_UPDATE_S3_PREFIX: ${{ vars.TV_UPDATE_S3_PREFIX || 'egi-tv' }}
+      TV_UPDATE_AUTOPUBLISH_ENABLED: ${{ vars.TV_UPDATE_AUTOPUBLISH_ENABLED || 'false' }}
+
+    steps:
+      - name: Checkout release source and tags
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build packages
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Run native TV test-only gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x apps/tv-shell/gradlew
+          ./apps/tv-shell/gradlew :app:testDebugUnitTest :app:lintDebug \
+            -PtvTarget=emulator \
+            -PtvApiBaseUrl=http://10.0.2.2:3000/api/v1/ \
+            --no-daemon
+
+      - name: Resolve and validate release identity
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          INPUT_VERSION_NAME: ${{ inputs.version_name }}
+          INPUT_VERSION_CODE: ${{ inputs.version_code }}
+          INPUT_PREVIOUS_VERSION_CODE: ${{ inputs.previous_version_code }}
+          INPUT_BOOTSTRAP_ONLY: ${{ inputs.bootstrap_only }}
+          INITIAL_PRODUCTION_VERSION_CODE: ${{ vars.TV_INITIAL_PRODUCTION_VERSION_CODE || '11' }}
+          API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
+          UPDATE_PUBLIC_BASE_URL: ${{ vars.TV_UPDATE_PUBLIC_BASE_URL || '' }}
+          UPDATE_S3_PREFIX: ${{ vars.TV_UPDATE_S3_PREFIX || 'egi-tv' }}
+          AUTOPUBLISH_ENABLED: ${{ vars.TV_UPDATE_AUTOPUBLISH_ENABLED || 'false' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version_name="${INPUT_VERSION_NAME:-}"
+            version_code="${INPUT_VERSION_CODE:-}"
+            previous_version_code="${INPUT_PREVIOUS_VERSION_CODE:-}"
+            bootstrap_only="${INPUT_BOOTSTRAP_ONLY:-false}"
+          else
+            if [[ ! "$RELEASE_TAG" =~ ^tv-v([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)*)-code([0-9]+)$ ]]; then
+              echo "Release tag must use tv-v<semver>-code<number>, for example tv-v0.4.8-code12." >&2
+              exit 1
+            fi
+            version_name="${BASH_REMATCH[1]}"
+            version_code="${BASH_REMATCH[3]}"
+            previous_version_code="${INITIAL_PRODUCTION_VERSION_CODE:-}"
+            bootstrap_only=false
+
+            if [[ ! "$previous_version_code" =~ ^[0-9]+$ ]]; then
+              echo 'TV_INITIAL_PRODUCTION_VERSION_CODE must be a positive integer.' >&2
+              exit 1
+            fi
+
+            while IFS= read -r existing_tag; do
+              if [[ "$existing_tag" =~ ^tv-v([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)*)-code([0-9]+)$ ]]; then
+                candidate_code="${BASH_REMATCH[3]}"
+                if (( candidate_code > previous_version_code && candidate_code < version_code )); then
+                  previous_version_code="$candidate_code"
+                fi
+              fi
+            done < <(git tag --list 'tv-v*-code*')
+          fi
+
+          if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)*$ ]]; then
+            echo 'version_name must be a safe semantic version such as 0.4.8 or 0.4.8-rc.1.' >&2
+            exit 1
+          fi
+          if [[ ! "$version_code" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'version_code must be a positive integer.' >&2
+            exit 1
+          fi
+          if [[ ! "$previous_version_code" =~ ^[0-9]+$ ]]; then
+            echo 'previous_version_code must be a non-negative integer.' >&2
+            exit 1
+          fi
+          if (( version_code <= previous_version_code )); then
+            echo "version_code $version_code must be greater than previous_version_code $previous_version_code." >&2
+            exit 1
+          fi
+          if [[ -z "${API_BASE_URL:-}" ]]; then
+            echo 'TV_PRODUCTION_API_BASE_URL is required.' >&2
+            exit 1
+          fi
+          if [[ "$AUTOPUBLISH_ENABLED" != 'true' && "$AUTOPUBLISH_ENABLED" != 'false' ]]; then
+            echo 'TV_UPDATE_AUTOPUBLISH_ENABLED must be true or false.' >&2
+            exit 1
+          fi
+
+          prefix="${UPDATE_S3_PREFIX#/}"
+          prefix="${prefix%/}"
+          if [[ -z "$prefix" || ! "$prefix" =~ ^[A-Za-z0-9._/-]+$ || "$prefix" == *//* || "$prefix" == *'..'* ]]; then
+            echo 'TV_UPDATE_S3_PREFIX must be a safe non-empty object prefix.' >&2
+            exit 1
+          fi
+
+          update_apk_url=''
+          update_release_id="tv-$version_name"
+          autopublish='false'
+          if [[ "$bootstrap_only" != 'true' && -n "${UPDATE_PUBLIC_BASE_URL:-}" ]]; then
+            update_base="${UPDATE_PUBLIC_BASE_URL%/}"
+            artifact_name="egi-tv-$version_name-code-$version_code"
+            update_apk_url="$update_base/$prefix/$version_code/$artifact_name.apk"
+          else
+            artifact_name="egi-tv-$version_name-code-$version_code"
+          fi
+
+          if [[ "$AUTOPUBLISH_ENABLED" == 'true' ]]; then
+            if [[ "$bootstrap_only" == 'true' ]]; then
+              echo 'bootstrap_only cannot be combined with TV_UPDATE_AUTOPUBLISH_ENABLED=true.' >&2
+              exit 1
+            fi
+            if [[ -z "${UPDATE_PUBLIC_BASE_URL:-}" ]]; then
+              echo 'TV_UPDATE_PUBLIC_BASE_URL is required when automatic publishing is enabled.' >&2
+              exit 1
+            fi
+            autopublish='true'
+          fi
+
+          {
+            echo "version_name=$version_name"
+            echo "version_code=$version_code"
+            echo "previous_version_code=$previous_version_code"
+            echo "artifact_name=$artifact_name"
+            echo "update_apk_url=$update_apk_url"
+            echo "update_release_id=$update_release_id"
+            echo "autopublish=$autopublish"
+            echo "object_prefix=$prefix"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo '## EGI TV release build'
+            echo
+            echo "- Version: `$version_name` (code `$version_code`)"
+            echo '- Package: `com.roomservice.tv`'
+            echo '- Variant: `release`'
+            echo "- Automatic update publication: `$autopublish`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare encrypted production signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TV_SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${KEYSTORE_BASE64:-}" ]]; then
+            echo 'TV_SIGNING_KEYSTORE_BASE64 is missing from the tv-release environment.' >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/egi-tv-release.p12"
+          chmod 600 "$RUNNER_TEMP/egi-tv-release.p12"
+          echo "TV_SIGNING_STORE_FILE=$RUNNER_TEMP/egi-tv-release.p12" >> "$GITHUB_ENV"
+
+      - name: Build signed release with the repository release gate
+        shell: bash
+        env:
+          API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
+          TV_SIGNING_STORE_PASSWORD: ${{ secrets.TV_SIGNING_STORE_PASSWORD }}
+          TV_SIGNING_KEY_ALIAS: ${{ secrets.TV_SIGNING_KEY_ALIAS }}
+          TV_SIGNING_KEY_PASSWORD: ${{ secrets.TV_SIGNING_KEY_PASSWORD }}
+          VERSION_CODE: ${{ steps.resolve.outputs.version_code }}
+          PREVIOUS_VERSION_CODE: ${{ steps.resolve.outputs.previous_version_code }}
+          VERSION_NAME: ${{ steps.resolve.outputs.version_name }}
+          UPDATE_APK_URL: ${{ steps.resolve.outputs.update_apk_url }}
+          UPDATE_RELEASE_ID: ${{ steps.resolve.outputs.update_release_id }}
+        run: |
+          set -euo pipefail
+          chmod +x apps/tv-shell/gradlew
+          if [[ -n "${UPDATE_APK_URL:-}" ]]; then
+            pwsh -NoLogo -NoProfile -NonInteractive -File ./tools/tv/package-tv.ps1 \
+              -ApiBaseUrl "$API_BASE_URL" \
+              -VersionCode "$VERSION_CODE" \
+              -PreviousVersionCode "$PREVIOUS_VERSION_CODE" \
+              -VersionName "$VERSION_NAME" \
+              -UpdateApkUrl "$UPDATE_APK_URL" \
+              -UpdateReleaseId "$UPDATE_RELEASE_ID"
+          else
+            pwsh -NoLogo -NoProfile -NonInteractive -File ./tools/tv/package-tv.ps1 \
+              -ApiBaseUrl "$API_BASE_URL" \
+              -VersionCode "$VERSION_CODE" \
+              -PreviousVersionCode "$PREVIOUS_VERSION_CODE" \
+              -VersionName "$VERSION_NAME"
+          fi
+
+      - name: Stage immutable release artifact
+        id: stage
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.resolve.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          output_dir="$RUNNER_TEMP/egi-tv-release"
+          mkdir -p "$output_dir"
+          source_dir='apps/tv-shell/app/build/outputs/apk/release'
+          cp "$source_dir/app-release.apk" "$output_dir/$ARTIFACT_NAME.apk"
+          cp "$source_dir/app-release.apk.sha256" "$output_dir/$ARTIFACT_NAME.apk.sha256"
+          cp "$source_dir/app-release.apk.manifest.json" "$output_dir/$ARTIFACT_NAME.apk.manifest.json"
+          if [[ -f "$source_dir/app-release.apk.tv-update-manifest.json" ]]; then
+            cp "$source_dir/app-release.apk.tv-update-manifest.json" "$output_dir/$ARTIFACT_NAME.tv-update-manifest.json"
+          fi
+
+          actual_sha256="$(sha256sum "$output_dir/$ARTIFACT_NAME.apk" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')"
+          manifest_sha256="$(jq -r '.sha256' "$output_dir/$ARTIFACT_NAME.apk.manifest.json" | tr '[:lower:]' '[:upper:]')"
+          if [[ "$actual_sha256" != "$manifest_sha256" ]]; then
+            echo 'Staged APK checksum does not match its release manifest.' >&2
+            exit 1
+          fi
+          echo "staged_directory=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.resolve.outputs.artifact_name }}
+          path: ${{ steps.stage.outputs.staged_directory }}
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-update:
+    name: Publish immutable APK to update storage
+    needs: build-release
+    if: ${{ needs.build-release.outputs.autopublish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: tv-update-publish
+
+    env:
+      ARTIFACT_NAME: ${{ needs.build-release.outputs.artifact_name }}
+      VERSION_CODE: ${{ needs.build-release.outputs.version_code }}
+      UPDATE_APK_URL: ${{ needs.build-release.outputs.update_apk_url }}
+      S3_ENDPOINT: ${{ vars.TV_UPDATE_S3_ENDPOINT }}
+      S3_BUCKET: ${{ vars.TV_UPDATE_S3_BUCKET }}
+      S3_REGION: ${{ vars.TV_UPDATE_S3_REGION || 'us-east-1' }}
+      S3_PREFIX: ${{ needs.build-release.outputs.object_prefix }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TV_UPDATE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TV_UPDATE_S3_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: 'true'
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+    steps:
+      - name: Download signed release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: ${{ runner.temp }}/egi-tv-release
+
+      - name: Validate storage configuration and artifact identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${S3_ENDPOINT:?TV_UPDATE_S3_ENDPOINT is required}"
+          : "${S3_BUCKET:?TV_UPDATE_S3_BUCKET is required}"
+          : "${AWS_ACCESS_KEY_ID:?TV_UPDATE_S3_ACCESS_KEY_ID is required}"
+          : "${AWS_SECRET_ACCESS_KEY:?TV_UPDATE_S3_SECRET_ACCESS_KEY is required}"
+          apk="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk"
+          update_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
+          test -f "$apk"
+          test -f "$update_manifest"
+          test "$(jq -r '.enabled' "$update_manifest")" = 'true'
+          test "$(jq -r '.packageName' "$update_manifest")" = 'com.roomservice.tv'
+          test "$(jq -r '.latestVersionCode' "$update_manifest")" = "$VERSION_CODE"
+          test "$(jq -r '.apkUrl' "$update_manifest")" = "$UPDATE_APK_URL"
+          echo "APK_URL=$UPDATE_APK_URL" >> "$GITHUB_ENV"
+
+      - name: Upload versioned APK and manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="${S3_PREFIX#/}"
+          prefix="${prefix%/}"
+          base_key="$prefix/$VERSION_CODE"
+          apk="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk"
+          checksum="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk.sha256"
+          release_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.apk.manifest.json"
+          update_manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
+
+          aws s3 cp "$apk" "s3://$S3_BUCKET/$base_key/$ARTIFACT_NAME.apk" \
+            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
+            --content-type 'application/vnd.android.package-archive' \
+            --cache-control 'public,max-age=31536000,immutable'
+          aws s3 cp "$checksum" "s3://$S3_BUCKET/$base_key/$ARTIFACT_NAME.apk.sha256" \
+            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
+            --content-type 'text/plain' --cache-control 'public,max-age=31536000,immutable'
+          aws s3 cp "$release_manifest" "s3://$S3_BUCKET/$base_key/$ARTIFACT_NAME.apk.manifest.json" \
+            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
+            --content-type 'application/json' --cache-control 'public,max-age=31536000,immutable'
+          aws s3 cp "$update_manifest" "s3://$S3_BUCKET/$base_key/update-manifest.json" \
+            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
+            --content-type 'application/json' --cache-control 'public,max-age=31536000,immutable'
+          aws s3 cp "$update_manifest" "s3://$S3_BUCKET/$prefix/latest.json" \
+            --endpoint-url "$S3_ENDPOINT" --region "$S3_REGION" --no-progress \
+            --content-type 'application/json' --cache-control 'no-cache,no-store,must-revalidate'
+
+      - name: Verify public immutable URL without following redirects
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers="$RUNNER_TEMP/egi-tv-update-headers.txt"
+          curl --fail --silent --show-error --max-time 30 --max-redirs 0 \
+            --range 0-0 --dump-header "$headers" --output /dev/null "$APK_URL"
+          status="$(awk 'NR == 1 { print $2 }' "$headers")"
+          if [[ "$status" != '200' && "$status" != '206' ]]; then
+            echo "Public APK URL returned unexpected HTTP status $status." >&2
+            exit 1
+          fi
+
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo '## EGI TV update published'
+            echo
+            echo "- Version code: `$VERSION_CODE`"
+            echo "- APK URL: `$APK_URL`"
+            echo '- Redirect policy: no redirects accepted'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote-api-update-feed:
+    name: Promote update feed on Railway
+    needs: [build-release, publish-update]
+    if: ${{ needs.build-release.outputs.autopublish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: tv-production-update
+
+    env:
+      ARTIFACT_NAME: ${{ needs.build-release.outputs.artifact_name }}
+      API_BASE_URL: ${{ vars.TV_PRODUCTION_API_BASE_URL || 'https://api-production-505c.up.railway.app/api/v1/' }}
+      RAILWAY_API_SERVICE: ${{ vars.RAILWAY_API_SERVICE }}
+      RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT || 'production' }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli
+
+      - name: Download signed release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: ${{ runner.temp }}/egi-tv-release
+
+      - name: Promote exact verified manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RAILWAY_TOKEN:?RAILWAY_TOKEN is required in the tv-production-update environment}"
+          : "${RAILWAY_API_SERVICE:?RAILWAY_API_SERVICE is required as an environment variable}"
+          manifest="$RUNNER_TEMP/egi-tv-release/$ARTIFACT_NAME.tv-update-manifest.json"
+          test -f "$manifest"
+
+          package_name="$(jq -r '.packageName' "$manifest")"
+          version_code="$(jq -r '.latestVersionCode' "$manifest")"
+          version_name="$(jq -r '.latestVersionName' "$manifest")"
+          apk_url="$(jq -r '.apkUrl' "$manifest")"
+          sha256="$(jq -r '.sha256' "$manifest")"
+          certificate_sha256="$(jq -r '.certificateSha256' "$manifest")"
+          release_id="$(jq -r '.releaseId' "$manifest")"
+          mandatory="$(jq -r '.mandatory' "$manifest")"
+          minimum_version_code="$(jq -r '.minSupportedVersionCode' "$manifest")"
+
+          test "$package_name" = 'com.roomservice.tv'
+          test "$certificate_sha256" = '50dff6906e42e0ea5ee933225fadf4a55cb9a2050baaeafa3bff8b6d90820904'
+          test "$apk_url" != 'null'
+          test "$sha256" != 'null'
+
+          railway variable set \
+            --service "$RAILWAY_API_SERVICE" \
+            --environment "$RAILWAY_ENVIRONMENT" \
+            "TV_UPDATE_ENABLED=true" \
+            "TV_UPDATE_VERSION_CODE=$version_code" \
+            "TV_UPDATE_VERSION_NAME=$version_name" \
+            "TV_UPDATE_APK_URL=$apk_url" \
+            "TV_UPDATE_SHA256=$sha256" \
+            "TV_UPDATE_CERTIFICATE_SHA256=$certificate_sha256" \
+            "TV_UPDATE_RELEASE_ID=$release_id" \
+            "TV_UPDATE_MANDATORY=$mandatory" \
+            "TV_UPDATE_MIN_SUPPORTED_VERSION_CODE=$minimum_version_code"
+
+      - name: Verify Railway serves the promoted manifest
+        shell: bash
+        env:
+          EXPECTED_VERSION_CODE: ${{ needs.build-release.outputs.version_code }}
+          EXPECTED_APK_URL: ${{ needs.build-release.outputs.update_apk_url }}
+        run: |
+          set -euo pipefail
+          manifest_endpoint="${API_BASE_URL%/}/tv/update-manifest"
+          for attempt in $(seq 1 18); do
+            response="$RUNNER_TEMP/egi-tv-feed-response.json"
+            if curl --fail --silent --show-error --max-time 15 "$manifest_endpoint" -o "$response"; then
+              actual_version_code="$(jq -r '.latestVersionCode // empty' "$response")"
+              actual_apk_url="$(jq -r '.apkUrl // empty' "$response")"
+              if [[ "$actual_version_code" == "$EXPECTED_VERSION_CODE" && "$actual_apk_url" == "$EXPECTED_APK_URL" ]]; then
+                echo 'Railway update feed matches the signed release.'
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo 'Railway did not serve the promoted update manifest within the verification window.' >&2
+          exit 1
+
+      - name: Promotion summary
+        run: |
+          {
+            echo '## EGI TV update feed promoted'
+            echo
+            echo "- Railway environment: `$RAILWAY_ENVIRONMENT`"
+            echo '- API feed verified against the exact signed artifact'
+          } >> "$GITHUB_STEP_SUMMARY"

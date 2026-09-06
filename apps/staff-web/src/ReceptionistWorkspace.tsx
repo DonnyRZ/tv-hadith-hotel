@@ -1,26 +1,47 @@
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FormEvent } from 'react';
 
-import { managementApi, StaffApiError, type IssuedGuestQr } from './management-api';
-import { AdminBrandMark, AdminLanguageSwitcher, ArrowIcon, getInitials } from './CafeWorkspace';
+import {
+  managementApi,
+  StaffApiError,
+  type IssuedGuestQr,
+  type ReceptionistFolioHistoryResponse,
+  type ReceptionistFolioResponse,
+} from './management-api';
+import {
+  AdminBrandMark,
+  AdminLanguageSwitcher,
+  ArrowIcon,
+  getInitials,
+  OrdersIcon,
+} from './CafeWorkspace';
 import { BulkQrSheet, RoomOperations } from './ReceptionistRoomOperations';
+import { OperationalDashboard } from './OperationalDashboard';
 import {
   getReceptionistRoomsForView,
   getReceptionistTotalPages,
+  emptyReceptionistFolioSummary,
   mapReceptionistRoom,
   paginateReceptionistRooms,
+  readReceptionistRoomCache,
+  readReceptionistFolioCache,
   RECEPTIONIST_FLOORS,
   RECEPTIONIST_ROOM_PAGE_SIZE,
   RECEPTIONIST_STAY_DAYS_MAX,
   RECEPTIONIST_STAY_DAYS_MIN,
+  writeReceptionistRoomCache,
+  writeReceptionistFolioCache,
   type ReceptionistFloor,
   type ReceptionistRoomPreview,
 } from './ReceptionistWorkspace.helpers';
 import type { AuthCopy, Language, ReceptionistCopy } from './i18n';
+import { StaffRealtimeIndicator, useStaffRealtime } from './StaffRealtime';
+import { ReceptionistFolioPanel } from './ReceptionistFolioPanel';
 
 interface StaffUser {
+  id: string;
   displayName: string;
   roles: string[];
   permissions: string[];
@@ -28,8 +49,11 @@ interface StaffUser {
 
 export interface ReceptionistWorkspaceProps {
   authCopy: AuthCopy;
+  activePage: 'rooms' | 'housekeeping';
   language: Language;
   onLanguageChange: (language: Language) => void;
+  onNavigateToRooms: () => void;
+  onNavigateToHousekeeping: () => void;
   onSignOut: () => void;
   user: StaffUser;
 }
@@ -94,33 +118,48 @@ function StatusDot({ status }: { status: ReceptionistRoomPreview['status'] }) {
 
 function RoomCard({
   copy,
+  highlighted,
   onOpen,
+  onSelect,
   room,
+  selected,
 }: {
   copy: ReceptionistCopy;
+  highlighted: boolean;
   onOpen: (room: ReceptionistRoomPreview) => void;
+  onSelect: (room: ReceptionistRoomPreview) => void;
   room: ReceptionistRoomPreview;
+  selected: boolean;
 }) {
   const occupied = room.status === 'OCCUPIED';
+  const folioTotal = room.folioSummary.totalsByCurrency
+    .map((amount) => `${amount.amount.toLocaleString()} ${amount.currency}`)
+    .join(' · ');
 
   return (
     <article
       aria-label={`${copy.room} ${room.number}, ${occupied ? copy.occupied : copy.vacant}`}
-      className={`receptionist-room-card ${occupied ? 'is-occupied' : 'is-vacant'}`}
+      className={`receptionist-room-card ${occupied ? 'is-occupied' : 'is-vacant'} ${selected ? 'is-selected' : ''} ${highlighted ? 'is-realtime-highlighted' : ''}`}
     >
-      <div className="receptionist-room-card__number">{room.number}</div>
-      <div className="receptionist-room-card__status">
-        <StatusDot status={room.status} />
-        <span>{occupied ? copy.occupied : copy.vacant}</span>
-      </div>
-      {occupied && room.guestName !== null && (
-        <p className="receptionist-room-card__guest" title={room.guestName}>
-          {room.guestName}
-        </p>
-      )}
-      {occupied && room.stayDays !== null && (
-        <p className="receptionist-room-card__stay">{copy.stayDaysValue(room.stayDays)}</p>
-      )}
+      <button
+        aria-pressed={selected}
+        className="receptionist-room-card__select"
+        onClick={() => onSelect(room)}
+        type="button"
+      >
+        <span className="receptionist-room-card__number">{room.number}</span>
+        <span className="receptionist-room-card__status">
+          <StatusDot status={room.status} />
+          {occupied ? copy.occupied : copy.vacant}
+        </span>
+        <span className="receptionist-room-card__guest" title={room.guestName ?? undefined}>
+          {room.guestName ?? '—'}
+        </span>
+        <span className="receptionist-room-card__folio">
+          <b>{room.folioSummary.orderCount}</b> {copy.orders.toLocaleLowerCase()}
+          {folioTotal.length > 0 && <small>{folioTotal}</small>}
+        </span>
+      </button>
       <button
         aria-haspopup="dialog"
         className="receptionist-room-card__action"
@@ -202,6 +241,15 @@ function roomMutationError(error: unknown, copy: ReceptionistCopy): string {
     if (error.code === 'STAY_DAYS_INVALID') return copy.stayDaysInvalid;
   }
   return copy.apiError;
+}
+
+function folioRequestError(error: unknown, copy: ReceptionistCopy): string {
+  if (error instanceof StaffApiError) {
+    if (error.status === 401 || error.code === 'UNAUTHORIZED') return copy.sessionExpired;
+    if (error.status === 403 || error.code === 'FORBIDDEN') return copy.apiError;
+    if (error.message.length > 0 && error.message !== 'Request failed.') return error.message;
+  }
+  return copy.folioError;
 }
 
 function RoomDrawer({
@@ -525,48 +573,373 @@ function RoomDrawer({
 
 export function ReceptionistWorkspace({
   authCopy,
+  activePage,
   language,
   onLanguageChange,
+  onNavigateToRooms,
+  onNavigateToHousekeeping,
   onSignOut,
   user,
 }: ReceptionistWorkspaceProps) {
   const copy = authCopy.receptionist;
-  const [rooms, setRooms] = useState<ReceptionistRoomPreview[]>([]);
+  const cachedRooms = useMemo(() => readReceptionistRoomCache(user.id), [user.id]);
+  const hasInitialRoomCache = cachedRooms !== null;
+  const [rooms, setRooms] = useState<ReceptionistRoomPreview[]>(() => cachedRooms ?? []);
   const [activeFloor, setActiveFloor] = useState<ReceptionistFloor>(1);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>(() =>
+    hasInitialRoomCache ? 'ready' : 'loading',
+  );
   const [loadError, setLoadError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<ReceptionistRoomPreview | null>(null);
+  const [focusedRoomId, setFocusedRoomId] = useState<string | null>(null);
+  const [activeFolio, setActiveFolio] = useState<ReceptionistFolioResponse | null>(null);
+  const [folioHistory, setFolioHistory] = useState<ReceptionistFolioHistoryResponse | null>(null);
+  const [historicalFolio, setHistoricalFolio] = useState<ReceptionistFolioResponse | null>(null);
+  const [folioTab, setFolioTab] = useState<'current' | 'history'>('current');
+  const [activeFolioState, setActiveFolioState] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle',
+  );
+  const [folioHistoryState, setFolioHistoryState] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
+  const [historicalFolioState, setHistoricalFolioState] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
+  const [activeFolioError, setActiveFolioError] = useState('');
+  const [folioHistoryError, setFolioHistoryError] = useState('');
+  const [historicalFolioError, setHistoricalFolioError] = useState('');
+  const [selectedHistoryAssignmentId, setSelectedHistoryAssignmentId] = useState<string | null>(
+    null,
+  );
   const [mutation, setMutation] = useState<RoomMutation>(null);
   const [drawerError, setDrawerError] = useState('');
   const [toast, setToast] = useState('');
   const [bulkQrItems, setBulkQrItems] = useState<IssuedGuestQr[] | null>(null);
   const [bulkQrBusy, setBulkQrBusy] = useState(false);
   const [bulkQrError, setBulkQrError] = useState('');
+  const roomsRef = useRef(rooms);
+  const activeRoomLoadController = useRef<AbortController | null>(null);
+  const activeFolioLoadController = useRef<AbortController | null>(null);
+  const folioHistoryLoadController = useRef<AbortController | null>(null);
+  const historicalFolioLoadController = useRef<AbortController | null>(null);
+  const activeFolioLoadSequence = useRef(0);
+  const folioHistoryLoadSequence = useRef(0);
+  const historicalFolioLoadSequence = useRef(0);
+  const roomLoadSequence = useRef(0);
+  const realtimeRefreshTimer = useRef<number | null>(null);
+  const realtimeHighlightTimeouts = useRef(new Map<string, number>());
+  const [highlightedRoomIds, setHighlightedRoomIds] = useState<Set<string>>(() => new Set());
   const isSearchingAllFloors = search.trim().length > 0;
   const canPairTv = user.permissions.includes('receptionist:tv:pair');
   const canManageQr = user.permissions.includes('receptionist:guest:assign');
+  const { status: realtimeStatus, subscribe } = useStaffRealtime();
 
-  const loadRooms = useCallback(async () => {
-    setLoadState('loading');
-    setLoadError('');
-    try {
-      const response = await managementApi.listAllReceptionistRooms();
-      const mappedRooms = response
-        .map(mapReceptionistRoom)
-        .filter((room): room is ReceptionistRoomPreview => room !== null);
-      setRooms(mappedRooms);
-      setLoadState('ready');
-    } catch (error) {
-      setLoadState('error');
-      setLoadError(roomMutationError(error, copy));
-    }
-  }, [copy]);
+  const focusedRoom = useMemo(
+    () => rooms.find((room) => room.id === focusedRoomId) ?? null,
+    [focusedRoomId, rooms],
+  );
+
+  const loadRooms = useCallback(
+    async ({ silent = false, signal }: { silent?: boolean; signal?: AbortSignal } = {}) => {
+      activeRoomLoadController.current?.abort();
+      const controller = new AbortController();
+      const requestSequence = ++roomLoadSequence.current;
+      const isCurrentRequest = () =>
+        requestSequence === roomLoadSequence.current && !controller.signal.aborted;
+      if (signal !== undefined) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
+      activeRoomLoadController.current = controller;
+      const keepVisibleData = silent || hasInitialRoomCache || roomsRef.current.length > 0;
+      if (!keepVisibleData) setLoadState('loading');
+      if (silent) setRefreshing(true);
+      setLoadError('');
+      try {
+        const response = await managementApi.listAllReceptionistRooms(controller.signal);
+        const mappedRooms = response
+          .map(mapReceptionistRoom)
+          .filter((room): room is ReceptionistRoomPreview => room !== null);
+        if (!isCurrentRequest()) return;
+        setRooms(mappedRooms);
+        roomsRef.current = mappedRooms;
+        writeReceptionistRoomCache(user.id, mappedRooms);
+        setLoadState('ready');
+      } catch (error) {
+        if ((error instanceof Error && error.name === 'AbortError') || !isCurrentRequest()) return;
+        setLoadState(keepVisibleData ? 'ready' : 'error');
+        setLoadError(roomMutationError(error, copy));
+      } finally {
+        if (activeRoomLoadController.current === controller) {
+          activeRoomLoadController.current = null;
+          setRefreshing(false);
+        }
+      }
+    },
+    [copy, hasInitialRoomCache, user.id],
+  );
+
+  const loadActiveFolio = useCallback(
+    async (room: ReceptionistRoomPreview | null, { silent = false } = {}) => {
+      activeFolioLoadController.current?.abort();
+      const controller = new AbortController();
+      const sequence = ++activeFolioLoadSequence.current;
+      const isCurrentRequest = () =>
+        sequence === activeFolioLoadSequence.current && !controller.signal.aborted;
+      activeFolioLoadController.current = controller;
+      setActiveFolioError('');
+
+      if (room === null || room.status === 'VACANT' || room.assignmentId === null) {
+        setActiveFolio(null);
+        setActiveFolioState('ready');
+        if (activeFolioLoadController.current === controller) {
+          activeFolioLoadController.current = null;
+        }
+        return;
+      }
+
+      const cached = readReceptionistFolioCache<ReceptionistFolioResponse>(
+        user.id,
+        room.id,
+        room.assignmentId,
+        'active',
+      );
+      if (cached !== null) {
+        setActiveFolio(cached);
+        setActiveFolioState('ready');
+      } else if (!silent) {
+        setActiveFolio(null);
+        setActiveFolioState('loading');
+      } else {
+        setActiveFolioState('loading');
+      }
+
+      try {
+        const response = await managementApi.getReceptionistActiveFolio(
+          room.id,
+          { page: 1, pageSize: 50 },
+          controller.signal,
+        );
+        if (!isCurrentRequest()) return;
+        setActiveFolio(response);
+        setActiveFolioState('ready');
+        writeReceptionistFolioCache(user.id, room.id, room.assignmentId, 'active', response);
+      } catch (error) {
+        if ((error instanceof Error && error.name === 'AbortError') || !isCurrentRequest()) return;
+        setActiveFolioState(cached === null ? 'error' : 'ready');
+        setActiveFolioError(folioRequestError(error, copy));
+      } finally {
+        if (activeFolioLoadController.current === controller) {
+          activeFolioLoadController.current = null;
+        }
+      }
+    },
+    [copy, user.id],
+  );
+
+  const loadFolioHistory = useCallback(
+    async (room: ReceptionistRoomPreview | null) => {
+      folioHistoryLoadController.current?.abort();
+      const controller = new AbortController();
+      const sequence = ++folioHistoryLoadSequence.current;
+      const isCurrentRequest = () =>
+        sequence === folioHistoryLoadSequence.current && !controller.signal.aborted;
+      folioHistoryLoadController.current = controller;
+      setFolioHistoryError('');
+      if (room === null) {
+        setFolioHistory(null);
+        setFolioHistoryState('ready');
+        if (folioHistoryLoadController.current === controller) {
+          folioHistoryLoadController.current = null;
+        }
+        return;
+      }
+
+      const cached = readReceptionistFolioCache<ReceptionistFolioHistoryResponse>(
+        user.id,
+        room.id,
+        null,
+        'history',
+      );
+      if (cached !== null) {
+        setFolioHistory(cached);
+        setFolioHistoryState('ready');
+      } else {
+        setFolioHistory(null);
+        setFolioHistoryState('loading');
+      }
+
+      try {
+        const response = await managementApi.listReceptionistFolioHistory(
+          room.id,
+          { page: 1, pageSize: 25 },
+          controller.signal,
+        );
+        if (!isCurrentRequest()) return;
+        setFolioHistory(response);
+        setFolioHistoryState('ready');
+        writeReceptionistFolioCache(user.id, room.id, null, 'history', response);
+      } catch (error) {
+        if ((error instanceof Error && error.name === 'AbortError') || !isCurrentRequest()) return;
+        setFolioHistoryState(cached === null ? 'error' : 'ready');
+        setFolioHistoryError(folioRequestError(error, copy));
+      } finally {
+        if (folioHistoryLoadController.current === controller) {
+          folioHistoryLoadController.current = null;
+        }
+      }
+    },
+    [copy, user.id],
+  );
+
+  const loadHistoricalFolio = useCallback(
+    async (room: ReceptionistRoomPreview | null, assignmentId: string) => {
+      if (room === null) return;
+      historicalFolioLoadController.current?.abort();
+      const controller = new AbortController();
+      const sequence = ++historicalFolioLoadSequence.current;
+      const isCurrentRequest = () =>
+        sequence === historicalFolioLoadSequence.current && !controller.signal.aborted;
+      historicalFolioLoadController.current = controller;
+      setHistoricalFolioError('');
+      const cached = readReceptionistFolioCache<ReceptionistFolioResponse>(
+        user.id,
+        room.id,
+        assignmentId,
+        'history-detail',
+      );
+      if (cached !== null) {
+        setHistoricalFolio(cached);
+        setHistoricalFolioState('ready');
+      } else {
+        setHistoricalFolio(null);
+        setHistoricalFolioState('loading');
+      }
+
+      try {
+        const response = await managementApi.getReceptionistFolioHistoryDetail(
+          room.id,
+          assignmentId,
+          { page: 1, pageSize: 50 },
+          controller.signal,
+        );
+        if (!isCurrentRequest()) return;
+        setHistoricalFolio(response);
+        setHistoricalFolioState('ready');
+        writeReceptionistFolioCache(user.id, room.id, assignmentId, 'history-detail', response);
+      } catch (error) {
+        if ((error instanceof Error && error.name === 'AbortError') || !isCurrentRequest()) return;
+        setHistoricalFolioState(cached === null ? 'error' : 'ready');
+        setHistoricalFolioError(folioRequestError(error, copy));
+      } finally {
+        if (historicalFolioLoadController.current === controller) {
+          historicalFolioLoadController.current = null;
+        }
+      }
+    },
+    [copy, user.id],
+  );
 
   useEffect(() => {
-    void loadRooms();
+    const controller = new AbortController();
+    void loadRooms({ silent: hasInitialRoomCache, signal: controller.signal });
+    return () => {
+      controller.abort();
+      activeRoomLoadController.current?.abort();
+    };
+  }, [hasInitialRoomCache, loadRooms]);
+
+  const queueRealtimeRefresh = useCallback(() => {
+    if (realtimeRefreshTimer.current !== null) return;
+    realtimeRefreshTimer.current = window.setTimeout(() => {
+      realtimeRefreshTimer.current = null;
+      void loadRooms({ silent: true });
+    }, 160);
   }, [loadRooms]);
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadRooms({ silent: true });
+    };
+    const interval = window.setInterval(
+      refreshIfVisible,
+      realtimeStatus === 'live' ? 60_000 : 15_000,
+    );
+    window.addEventListener('focus', refreshIfVisible);
+    window.addEventListener('online', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshIfVisible);
+      window.removeEventListener('online', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
+  }, [loadRooms, realtimeStatus]);
+
+  useEffect(() => {
+    if (realtimeStatus !== 'live') return undefined;
+    void loadRooms({ silent: true });
+    return undefined;
+  }, [loadRooms, realtimeStatus]);
+
+  useEffect(() => {
+    const unsubscribe = subscribe((event) => {
+      const isRoomEvent = event.eventType === 'staff.room.updated';
+      const isRequestEvent =
+        event.eventType === 'staff.request.created' || event.eventType === 'staff.request.updated';
+      if (!isRoomEvent && !isRequestEvent) return;
+
+      const roomId = isRoomEvent ? event.entityId : event.roomId;
+
+      setHighlightedRoomIds((current) => new Set(current).add(roomId));
+      const previousTimeout = realtimeHighlightTimeouts.current.get(roomId);
+      if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
+      const timeout = window.setTimeout(() => {
+        setHighlightedRoomIds((current) => {
+          const next = new Set(current);
+          next.delete(roomId);
+          return next;
+        });
+        realtimeHighlightTimeouts.current.delete(roomId);
+      }, 4_000);
+      realtimeHighlightTimeouts.current.set(roomId, timeout);
+      if (activePage === 'rooms') setToast(copy.realtimeUpdated);
+      queueRealtimeRefresh();
+      if (roomId === focusedRoomId && isRequestEvent) {
+        void loadActiveFolio(focusedRoom, { silent: true });
+      }
+    });
+    return unsubscribe;
+  }, [
+    activePage,
+    copy.realtimeUpdated,
+    focusedRoom,
+    focusedRoomId,
+    loadActiveFolio,
+    queueRealtimeRefresh,
+    subscribe,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (realtimeRefreshTimer.current !== null) {
+        window.clearTimeout(realtimeRefreshTimer.current);
+        realtimeRefreshTimer.current = null;
+      }
+      for (const timeout of realtimeHighlightTimeouts.current.values()) {
+        window.clearTimeout(timeout);
+      }
+      realtimeHighlightTimeouts.current.clear();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms]);
 
   useEffect(() => {
     if (toast.length === 0) return undefined;
@@ -595,6 +968,46 @@ export function ReceptionistWorkspace({
     if (currentPage !== page) setPage(currentPage);
   }, [currentPage, page]);
 
+  useEffect(() => {
+    if (visibleRooms.length === 0) {
+      if (focusedRoomId !== null) setFocusedRoomId(null);
+      return;
+    }
+    if (!visibleRooms.some((room) => room.id === focusedRoomId)) {
+      setFocusedRoomId(visibleRooms[0]?.id ?? null);
+    }
+  }, [focusedRoomId, visibleRooms]);
+
+  useEffect(() => {
+    setFolioTab('current');
+    setActiveFolio(null);
+    setActiveFolioState('idle');
+    setActiveFolioError('');
+    setFolioHistory(null);
+    setFolioHistoryState('idle');
+    setFolioHistoryError('');
+    setHistoricalFolio(null);
+    setHistoricalFolioState('idle');
+    setHistoricalFolioError('');
+    setSelectedHistoryAssignmentId(null);
+    void loadActiveFolio(focusedRoom);
+  }, [focusedRoom?.assignmentId, focusedRoom?.id, focusedRoom?.status, loadActiveFolio]);
+
+  useEffect(() => {
+    if (folioTab !== 'history') return undefined;
+    void loadFolioHistory(focusedRoom);
+    return undefined;
+  }, [folioTab, focusedRoom?.id, loadFolioHistory]);
+
+  useEffect(
+    () => () => {
+      activeFolioLoadController.current?.abort();
+      folioHistoryLoadController.current?.abort();
+      historicalFolioLoadController.current?.abort();
+    },
+    [],
+  );
+
   function selectFloor(nextFloor: ReceptionistFloor) {
     setActiveFloor(nextFloor);
     setSearch('');
@@ -606,10 +1019,23 @@ export function ReceptionistWorkspace({
     setDrawerError('');
   }
 
+  function selectRoom(room: ReceptionistRoomPreview) {
+    setFocusedRoomId(room.id);
+  }
+
   function replaceRoom(roomId: string, update: Partial<ReceptionistRoomPreview>) {
-    setRooms((currentRooms) =>
-      currentRooms.map((room) => (room.id === roomId ? { ...room, ...update } : room)),
-    );
+    setRooms((currentRooms) => {
+      const nextRooms = currentRooms.map((room) =>
+        room.id === roomId ? { ...room, ...update } : room,
+      );
+      roomsRef.current = nextRooms;
+      writeReceptionistRoomCache(user.id, nextRooms);
+      return nextRooms;
+    });
+  }
+
+  function selectFolioTab(tab: 'current' | 'history') {
+    setFolioTab(tab);
   }
 
   function showSuccess(message: string) {
@@ -642,6 +1068,7 @@ export function ReceptionistWorkspace({
         guestName: assignment.guestName,
         stayDays: assignment.stayDays,
         status: 'OCCUPIED',
+        folioSummary: emptyReceptionistFolioSummary(),
       });
       showSuccess(copy.assignSuccess);
     } catch (error) {
@@ -686,6 +1113,7 @@ export function ReceptionistWorkspace({
         guestName: null,
         stayDays: null,
         status: 'VACANT',
+        folioSummary: emptyReceptionistFolioSummary(),
       });
       showSuccess(copy.checkoutSuccess);
     } catch (error) {
@@ -715,9 +1143,22 @@ export function ReceptionistWorkspace({
         <div className="admin-sidebar__rule" />
         <p className="admin-sidebar__label">{copy.mainNavigation}</p>
         <nav aria-label={copy.mainNavigation} className="admin-sidebar__nav">
-          <button className="admin-nav-item is-active" type="button">
+          <button
+            className={`admin-nav-item ${activePage === 'rooms' ? 'is-active' : ''}`}
+            onClick={onNavigateToRooms}
+            type="button"
+          >
             <RoomsIcon />
             <span>{copy.rooms}</span>
+            <ArrowIcon direction="right" />
+          </button>
+          <button
+            className={`admin-nav-item ${activePage === 'housekeeping' ? 'is-active' : ''}`}
+            onClick={onNavigateToHousekeeping}
+            type="button"
+          >
+            <OrdersIcon />
+            <span>{copy.housekeeping}</span>
             <ArrowIcon direction="right" />
           </button>
         </nav>
@@ -739,9 +1180,10 @@ export function ReceptionistWorkspace({
       <div className="admin-main">
         <header className="admin-topbar">
           <div className="admin-breadcrumb">
-            <strong>{copy.rooms}</strong>
+            <strong>{activePage === 'rooms' ? copy.rooms : copy.housekeeping}</strong>
           </div>
           <div className="admin-topbar__actions">
+            <StaffRealtimeIndicator language={language} />
             <AdminLanguageSwitcher
               authCopy={authCopy}
               language={language}
@@ -750,145 +1192,240 @@ export function ReceptionistWorkspace({
           </div>
         </header>
 
-        <main className="admin-content receptionist-content">
-          <section aria-label={copy.rooms} className="admin-page">
-            <div className="receptionist-toolbar">
-              <label className="admin-search-field receptionist-search">
-                <span className="sr-only">{copy.searchRooms}</span>
-                <SearchIcon />
-                <input
-                  aria-label={copy.searchRooms}
-                  disabled={loadState === 'loading'}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setPage(1);
-                  }}
-                  placeholder={copy.searchPlaceholder}
-                  type="search"
-                  value={search}
-                />
-              </label>
-              {canManageQr && (
-                <button
-                  className="admin-button admin-button--quiet receptionist-bulk-qr-button"
-                  disabled={loadState !== 'ready' || bulkQrBusy}
-                  onClick={() => void generateBulkQrSheet()}
-                  type="button"
-                >
-                  {bulkQrBusy ? copy.qrSheetGenerating : copy.qrSheet}
-                </button>
-              )}
-              {bulkQrError.length > 0 && (
-                <p className="admin-form-error receptionist-bulk-qr-error" role="alert">
-                  {bulkQrError}
-                </p>
-              )}
-            </div>
-
-            <div
-              className="receptionist-floor-tabs"
-              role="tablist"
-              aria-label={copy.floorNavigation}
-            >
-              {RECEPTIONIST_FLOORS.map((definition) => (
-                <button
-                  aria-controls="receptionist-room-board"
-                  aria-selected={activeFloor === definition.floor}
-                  className={
-                    activeFloor === definition.floor
-                      ? 'receptionist-floor-tab is-active'
-                      : 'receptionist-floor-tab'
-                  }
-                  key={definition.floor}
-                  onClick={() => selectFloor(definition.floor)}
-                  role="tab"
-                  type="button"
-                >
-                  {copy.floorLabel(definition.floor)}
-                </button>
-              ))}
-            </div>
-
-            <div className="receptionist-board-heading">
-              <div>
-                <p className="admin-eyebrow">{copy.roomBoard}</p>
-                <h2>
-                  {isSearchingAllFloors
-                    ? copy.searchResults
-                    : floorDefinition === undefined
-                      ? copy.rooms
-                      : copy.floorRange(floorDefinition.firstRoom, floorDefinition.lastRoom)}
-                </h2>
-              </div>
-              <div className="receptionist-status-legend" aria-label={copy.statusLegend}>
-                <span>
-                  <StatusDot status="VACANT" />
-                  {copy.vacant}
-                </span>
-                <span>
-                  <StatusDot status="OCCUPIED" />
-                  {copy.occupied}
-                </span>
-              </div>
-            </div>
-
-            <section
-              aria-labelledby="receptionist-room-board-title"
-              className="receptionist-room-board"
-              id="receptionist-room-board"
-              role="tabpanel"
-            >
-              <h3 className="sr-only" id="receptionist-room-board-title">
-                {copy.roomBoard}
-              </h3>
-              {loadState === 'loading' ? (
-                <div className="admin-loading-state receptionist-loading-state" aria-live="polite">
-                  <span className="admin-loading-line admin-loading-line--wide" />
-                  <span className="admin-loading-line" />
-                  <span className="admin-loading-line admin-loading-line--short" />
-                  <p>{copy.loading}</p>
+        <div className="receptionist-view-stack">
+          <div className="receptionist-view-panel" hidden={activePage !== 'rooms'}>
+            <main className="admin-content receptionist-content">
+              <section aria-label={copy.rooms} className="admin-page">
+                <div className="receptionist-toolbar">
+                  <label className="admin-search-field receptionist-search">
+                    <span className="sr-only">{copy.searchRooms}</span>
+                    <SearchIcon />
+                    <input
+                      aria-label={copy.searchRooms}
+                      disabled={loadState === 'loading'}
+                      onChange={(event) => {
+                        setSearch(event.target.value);
+                        setPage(1);
+                      }}
+                      placeholder={copy.searchPlaceholder}
+                      type="search"
+                      value={search}
+                    />
+                  </label>
+                  {canManageQr && (
+                    <button
+                      className="admin-button admin-button--quiet receptionist-bulk-qr-button"
+                      disabled={loadState !== 'ready' || bulkQrBusy}
+                      onClick={() => void generateBulkQrSheet()}
+                      type="button"
+                    >
+                      {bulkQrBusy ? copy.qrSheetGenerating : copy.qrSheet}
+                    </button>
+                  )}
+                  {loadState === 'ready' && loadError.length > 0 && (
+                    <div className="receptionist-refresh-notice" role="status">
+                      <span>{loadError}</span>
+                      <button onClick={() => void loadRooms({ silent: true })} type="button">
+                        {copy.retry}
+                      </button>
+                    </div>
+                  )}
+                  {bulkQrError.length > 0 && (
+                    <p className="admin-form-error receptionist-bulk-qr-error" role="alert">
+                      {bulkQrError}
+                    </p>
+                  )}
                 </div>
-              ) : loadState === 'error' ? (
-                <div className="admin-empty-state receptionist-empty-state">
-                  <div className="admin-empty-state__mark">!</div>
-                  <h3>{copy.errorLoading}</h3>
-                  <p>{loadError}</p>
-                  <button
-                    className="admin-button admin-button--quiet"
-                    onClick={() => void loadRooms()}
-                    type="button"
-                  >
-                    {copy.retry}
-                  </button>
-                </div>
-              ) : visibleRooms.length > 0 ? (
-                <div className="receptionist-room-grid">
-                  {visibleRooms.map((room) => (
-                    <RoomCard copy={copy} key={room.id} onOpen={openRoom} room={room} />
+
+                <div
+                  className="receptionist-floor-tabs"
+                  role="tablist"
+                  aria-label={copy.floorNavigation}
+                >
+                  {RECEPTIONIST_FLOORS.map((definition) => (
+                    <button
+                      aria-controls="receptionist-room-board"
+                      aria-selected={activeFloor === definition.floor}
+                      className={
+                        activeFloor === definition.floor
+                          ? 'receptionist-floor-tab is-active'
+                          : 'receptionist-floor-tab'
+                      }
+                      key={definition.floor}
+                      onClick={() => selectFloor(definition.floor)}
+                      role="tab"
+                      type="button"
+                    >
+                      {copy.floorLabel(definition.floor)}
+                    </button>
                   ))}
                 </div>
-              ) : (
-                <div className="receptionist-empty-state">
-                  <div className="admin-empty-state__mark">—</div>
-                  <h3>{copy.noRooms}</h3>
-                  <p>{copy.noRoomsDescription}</p>
-                </div>
-              )}
-            </section>
 
-            <div className="receptionist-board-footer">
-              <p className="receptionist-range-label">{rangeLabel}</p>
-              {filteredRooms.length > 0 && (
-                <RoomPagination
-                  copy={copy}
-                  currentPage={currentPage}
-                  onPageChange={setPage}
-                  totalPages={totalPages}
-                />
-              )}
-            </div>
-          </section>
-        </main>
+                <div className="receptionist-board-heading">
+                  <div>
+                    <p className="admin-eyebrow">{copy.roomBoard}</p>
+                    <h2>
+                      {isSearchingAllFloors
+                        ? copy.searchResults
+                        : floorDefinition === undefined
+                          ? copy.rooms
+                          : copy.floorRange(floorDefinition.firstRoom, floorDefinition.lastRoom)}
+                    </h2>
+                  </div>
+                  <div className="receptionist-board-heading__actions">
+                    <button
+                      className="admin-button admin-button--quiet"
+                      disabled={refreshing || loadState === 'loading'}
+                      onClick={() => void loadRooms({ silent: true })}
+                      type="button"
+                    >
+                      {refreshing ? copy.loading : copy.refresh}
+                    </button>
+                    <div className="receptionist-status-legend" aria-label={copy.statusLegend}>
+                      <span>
+                        <StatusDot status="VACANT" />
+                        {copy.vacant}
+                      </span>
+                      <span>
+                        <StatusDot status="OCCUPIED" />
+                        {copy.occupied}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <section
+                  aria-labelledby="receptionist-room-board-title"
+                  className="receptionist-room-board"
+                  id="receptionist-room-board"
+                  role="tabpanel"
+                >
+                  <h3 className="sr-only" id="receptionist-room-board-title">
+                    {copy.roomBoard}
+                  </h3>
+                  {loadState === 'loading' ? (
+                    <div
+                      className="admin-loading-state receptionist-loading-state"
+                      aria-live="polite"
+                    >
+                      <span className="admin-loading-line admin-loading-line--wide" />
+                      <span className="admin-loading-line" />
+                      <span className="admin-loading-line admin-loading-line--short" />
+                      <p>{copy.loading}</p>
+                    </div>
+                  ) : loadState === 'error' ? (
+                    <div className="admin-empty-state receptionist-empty-state">
+                      <div className="admin-empty-state__mark">!</div>
+                      <h3>{copy.errorLoading}</h3>
+                      <p>{loadError}</p>
+                      <button
+                        className="admin-button admin-button--quiet"
+                        onClick={() => void loadRooms()}
+                        type="button"
+                      >
+                        {copy.retry}
+                      </button>
+                    </div>
+                  ) : visibleRooms.length > 0 ? (
+                    <div className="receptionist-master-detail">
+                      <div className="receptionist-room-list" aria-label={copy.rooms}>
+                        <div className="receptionist-room-list__header">
+                          <div>
+                            <p className="admin-eyebrow">{copy.rooms}</p>
+                            <span>
+                              {copy.showingRange(
+                                firstVisible?.number ?? '—',
+                                lastVisible?.number ?? '—',
+                                filteredRooms.length,
+                              )}
+                            </span>
+                          </div>
+                          <span className="receptionist-room-list__count">
+                            {filteredRooms.length}
+                          </span>
+                        </div>
+                        <div className="receptionist-room-grid">
+                          {visibleRooms.map((room) => (
+                            <RoomCard
+                              copy={copy}
+                              highlighted={highlightedRoomIds.has(room.id)}
+                              key={room.id}
+                              onOpen={openRoom}
+                              onSelect={selectRoom}
+                              room={room}
+                              selected={focusedRoomId === room.id}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <ReceptionistFolioPanel
+                        activeFolio={activeFolio}
+                        activeError={activeFolioError}
+                        activeState={activeFolioState}
+                        copy={copy}
+                        historicalFolio={historicalFolio}
+                        historicalError={historicalFolioError}
+                        historicalState={historicalFolioState}
+                        history={folioHistory}
+                        historyError={folioHistoryError}
+                        historyState={folioHistoryState}
+                        language={language}
+                        onOpenRoomAccess={() => {
+                          if (focusedRoom !== null) openRoom(focusedRoom);
+                        }}
+                        onRetryActive={() => void loadActiveFolio(focusedRoom)}
+                        onRetryHistory={() => void loadFolioHistory(focusedRoom)}
+                        onRetryHistorical={() => {
+                          if (selectedHistoryAssignmentId !== null) {
+                            void loadHistoricalFolio(focusedRoom, selectedHistoryAssignmentId);
+                          }
+                        }}
+                        onSelectHistory={(assignmentId) => {
+                          setSelectedHistoryAssignmentId(assignmentId);
+                          void loadHistoricalFolio(focusedRoom, assignmentId);
+                        }}
+                        onTabChange={selectFolioTab}
+                        room={focusedRoom}
+                        folioTab={folioTab}
+                        selectedHistoryAssignmentId={selectedHistoryAssignmentId}
+                      />
+                    </div>
+                  ) : (
+                    <div className="receptionist-empty-state">
+                      <div className="admin-empty-state__mark">—</div>
+                      <h3>{copy.noRooms}</h3>
+                      <p>{copy.noRoomsDescription}</p>
+                    </div>
+                  )}
+                </section>
+
+                <div className="receptionist-board-footer">
+                  <p className="receptionist-range-label">{rangeLabel}</p>
+                  {filteredRooms.length > 0 && (
+                    <RoomPagination
+                      copy={copy}
+                      currentPage={currentPage}
+                      onPageChange={setPage}
+                      totalPages={totalPages}
+                    />
+                  )}
+                </div>
+              </section>
+            </main>
+          </div>
+          <div className="receptionist-view-panel" hidden={activePage !== 'housekeeping'}>
+            <OperationalDashboard
+              authCopy={authCopy}
+              embedded
+              language={language}
+              onLanguageChange={onLanguageChange}
+              onNavigate={undefined}
+              onSignOut={onSignOut}
+              role="HOUSEKEEPING"
+              user={user}
+            />
+          </div>
+        </div>
       </div>
 
       {selectedRoom !== null && (

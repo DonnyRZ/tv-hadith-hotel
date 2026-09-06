@@ -28,11 +28,16 @@ describe('RBAC policy', () => {
     expect(mergeRolePermissions(['SUPERADMIN'])).toEqual(['role:manage', 'user:manage']);
     expect(getAccessibleUnits(['SUPERADMIN'])).toEqual([]);
     expect(mergeRolePermissions(['RECEPTIONIST'])).toEqual([
+      'receptionist:folio:view',
       'receptionist:guest:assign',
       'receptionist:guest:checkout',
       'receptionist:guest:update',
       'receptionist:rooms:view',
       'receptionist:tv:pair',
+      'request:complete',
+      'request:confirm',
+      'request:history',
+      'request:view',
     ]);
     expect(getAccessibleUnits(['ROOM_MANAGER'])).toEqual([
       'HOUSEKEEPING',
@@ -40,7 +45,7 @@ describe('RBAC policy', () => {
       'RESTAURANT',
       'SPA',
     ]);
-    expect(getAccessibleUnits(['RECEPTIONIST'])).toEqual([]);
+    expect(getAccessibleUnits(['RECEPTIONIST'])).toEqual(['HOUSEKEEPING']);
     expect(getAccessibleUnits(['RESTAURANT'])).toEqual(['RESTAURANT']);
     expect(getAccessibleUnits(['LOUNGE'])).toEqual(['LOUNGE']);
     expect(mergeRolePermissions(['CAFE'])).toContain('menu:manage');
@@ -48,6 +53,19 @@ describe('RBAC policy', () => {
     expect(mergeRolePermissions(['LOUNGE'])).toContain('menu:manage');
     expect(mergeRolePermissions(['SPA'])).toContain('menu:manage');
     expect(mergeRolePermissions(['BEAUTY_AND_SALON'])).toContain('menu:manage');
+    expect(getAccessibleUnits(['BUTIK_INDONESIA'])).toEqual(['BUTIK_INDONESIA']);
+    expect(mergeRolePermissions(['BUTIK_INDONESIA'])).toEqual([
+      'inventory:manage',
+      'media:manage',
+      'menu:manage',
+      'request:cancel',
+      'request:complete',
+      'request:confirm',
+      'request:history',
+      'request:view',
+    ]);
+    expect(getAccessibleUnits(['ROOM_MANAGER'])).not.toContain('BUTIK_INDONESIA');
+    expect(getAccessibleUnits(['RECEPTIONIST'])).not.toContain('BUTIK_INDONESIA');
   });
 
   it('allows a required permission and rejects an out-of-scope permission', () => {

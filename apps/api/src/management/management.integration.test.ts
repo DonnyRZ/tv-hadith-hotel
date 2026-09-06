@@ -52,6 +52,11 @@ describe('Superadmin management API', () => {
       expect.arrayContaining([
         expect.objectContaining({ code: 'RESTAURANT', system: true }),
         expect.objectContaining({ code: 'LOUNGE', system: true }),
+        expect.objectContaining({
+          code: 'BUTIK_INDONESIA',
+          name: 'Butik Indonesia',
+          system: true,
+        }),
       ]),
     );
     expect(systemRoles.body.items).not.toEqual(

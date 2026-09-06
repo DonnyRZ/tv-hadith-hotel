@@ -11,6 +11,7 @@ import com.roomservice.tv.data.DeviceCredentialProvider
 import com.roomservice.tv.data.TvRealtimeClient
 import com.roomservice.tv.data.TvRepository
 import com.roomservice.tv.presentation.TvViewModel
+import com.roomservice.tv.update.TvUpdateManager
 
 class TvApplication : Application() {
     lateinit var container: TvAppContainer
@@ -30,6 +31,11 @@ class TvAppContainer(
     private val languageStore = AndroidTvLanguageStore(application)
     private val api = com.roomservice.tv.data.createTvApi(BuildConfig.API_BASE_URL, credentialProvider)
     private var viewModel: TvViewModel? = null
+
+    val updateManager: TvUpdateManager = TvUpdateManager(
+        context = application,
+        api = api,
+    )
 
     val repository: TvRepository = DefaultTvRepository(
         api = api,

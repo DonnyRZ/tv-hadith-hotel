@@ -6,8 +6,15 @@
   "files": [
     "openapi.yaml",
     "README.md",
-    "realtime-events.md"
+    "realtime-events.md",
+    "src"
   ],
+  "exports": {
+    "./realtime-events": {
+      "types": "./src/realtime-events.ts",
+      "default": "./src/realtime-events.ts"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }

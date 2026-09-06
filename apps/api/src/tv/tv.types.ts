@@ -1,3 +1,5 @@
+import type { GuestStay } from '../guest/guest.types';
+
 export type TvProvisioningStatus = 'PENDING' | 'PAIRED' | 'CLAIMED' | 'REVOKED';
 
 export interface TvRoomReference {
@@ -68,6 +70,20 @@ export interface TvContext {
     guestName: string | null;
     personalized: boolean;
   };
+  stay: GuestStay | null;
+}
+
+export interface TvUpdateManifest {
+  enabled: boolean;
+  packageName: string;
+  latestVersionCode: number;
+  latestVersionName: string | null;
+  apkUrl: string | null;
+  sha256: string | null;
+  certificateSha256: string | null;
+  releaseId: string;
+  mandatory: boolean;
+  minSupportedVersionCode: number | null;
 }
 
 export interface PairTvDeviceResult {

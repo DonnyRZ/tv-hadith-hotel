@@ -12,18 +12,30 @@ param(
 
     [string] $PairingCode,
 
-    [string] $PackageName = 'com.roomservice.tv.debug',
+    [string] $PackageName = 'com.roomservice.tv',
 
+    [Parameter(Mandatory = $true)]
     [string] $ExpectedSha256
 )
 
-$resolvedApkPath = Resolve-Path -LiteralPath $ApkPath -ErrorAction Stop
+if ($PackageName -ne 'com.roomservice.tv') {
+    throw 'Operational TV installation is release-only and accepts only package com.roomservice.tv. Debug APKs are test-only and must not be installed through this script.'
+}
 
-if (-not [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
-    $actualSha256 = (Get-FileHash -LiteralPath $resolvedApkPath.Path -Algorithm SHA256).Hash
-    if ($actualSha256 -ne $ExpectedSha256.Trim().ToUpperInvariant()) {
-        throw "APK checksum mismatch. Expected $ExpectedSha256 but found $actualSha256."
-    }
+$resolvedApkPath = Resolve-Path -LiteralPath $ApkPath -ErrorAction Stop
+$actualSha256 = (Get-FileHash -LiteralPath $resolvedApkPath.Path -Algorithm SHA256).Hash
+if ($actualSha256 -ne $ExpectedSha256.Trim().ToUpperInvariant()) {
+    throw "APK checksum mismatch. Expected $ExpectedSha256 but found $actualSha256."
+}
+
+$manifestPath = "$($resolvedApkPath.Path).manifest.json"
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "Release manifest was not found at $manifestPath. Install the APK produced by package-tv.ps1."
+}
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if ($manifest.packageName -ne 'com.roomservice.tv' -or $manifest.variant -ne 'release' -or
+    $manifest.sha256 -ne $actualSha256) {
+    throw 'Release manifest does not match package com.roomservice.tv, release variant, and APK checksum.'
 }
 
 $adbCommand = Get-Command adb -ErrorAction SilentlyContinue

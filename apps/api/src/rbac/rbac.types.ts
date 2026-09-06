@@ -8,6 +8,7 @@ export const ROLE_CODES = [
   'HOUSEKEEPING',
   'BEAUTY_AND_SALON',
   'CAFE',
+  'BUTIK_INDONESIA',
 ] as const;
 
 export type RoleCode = (typeof ROLE_CODES)[number];
@@ -19,11 +20,15 @@ export const PERMISSION_CODES = [
   'request:history',
   'room-manager:monitor',
   'receptionist:rooms:view',
+  'receptionist:folio:view',
   'receptionist:guest:assign',
   'receptionist:guest:update',
   'receptionist:guest:checkout',
   'receptionist:tv:pair',
   'menu:manage',
+  'inventory:manage',
+  'media:manage',
+  'request:cancel',
   'user:manage',
   'role:manage',
 ] as const;
@@ -37,6 +42,7 @@ export const UNIT_CODES = [
   'HOUSEKEEPING',
   'BEAUTY_AND_SALON',
   'CAFE',
+  'BUTIK_INDONESIA',
 ] as const;
 
 export type UnitCode = (typeof UNIT_CODES)[number];
@@ -45,7 +51,12 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleCode, readonly PermissionCode
   SUPERADMIN: ['user:manage', 'role:manage'],
   ROOM_MANAGER: ['request:view', 'request:history', 'room-manager:monitor'],
   RECEPTIONIST: [
+    'request:view',
+    'request:confirm',
+    'request:complete',
+    'request:history',
     'receptionist:rooms:view',
+    'receptionist:folio:view',
     'receptionist:guest:assign',
     'receptionist:guest:update',
     'receptionist:guest:checkout',
@@ -69,18 +80,29 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleCode, readonly PermissionCode
     'menu:manage',
   ],
   CAFE: ['request:view', 'request:confirm', 'request:complete', 'request:history', 'menu:manage'],
+  BUTIK_INDONESIA: [
+    'request:view',
+    'request:confirm',
+    'request:complete',
+    'request:history',
+    'request:cancel',
+    'menu:manage',
+    'inventory:manage',
+    'media:manage',
+  ],
 };
 
 export const ROLE_UNITS: Readonly<Record<RoleCode, readonly UnitCode[]>> = {
   SUPERADMIN: [],
   ROOM_MANAGER: ['SPA', 'RESTAURANT', 'LOUNGE', 'HOUSEKEEPING'],
-  RECEPTIONIST: [],
+  RECEPTIONIST: ['HOUSEKEEPING'],
   SPA: ['SPA'],
   RESTAURANT: ['RESTAURANT'],
   LOUNGE: ['LOUNGE'],
   HOUSEKEEPING: ['HOUSEKEEPING'],
   BEAUTY_AND_SALON: ['BEAUTY_AND_SALON'],
   CAFE: ['CAFE'],
+  BUTIK_INDONESIA: ['BUTIK_INDONESIA'],
 };
 
 export function isRoleCode(value: unknown): value is RoleCode {

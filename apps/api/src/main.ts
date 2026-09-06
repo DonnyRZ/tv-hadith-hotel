@@ -2,17 +2,32 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
+import type { RequestHandler } from 'express';
 
-import { ApiExceptionFilter } from './http/api-exception.filter';
+import { STAFF_SESSION_MIDDLEWARE } from './auth/auth.constants';
 import { AppModule } from './app.module';
-import { createStaffSessionMiddleware } from './auth/session.middleware';
+import { ApiExceptionFilter } from './http/api-exception.filter';
+import { requestContextMiddleware } from './http/request-context.middleware';
+import { RealtimeIoAdapter } from './realtime/realtime.io-adapter';
+import { RealtimeState } from './realtime/realtime.state';
 
 export async function createApplication(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  const staffSessionMiddleware = app.get<RequestHandler>(STAFF_SESSION_MIDDLEWARE);
+  const realtimeAdapter = new RealtimeIoAdapter(
+    app,
+    config,
+    app.get(RealtimeState),
+    staffSessionMiddleware,
+  );
+  await realtimeAdapter.initialize();
+  app.useWebSocketAdapter(realtimeAdapter);
+  app.getHttpServer().once('close', () => void realtimeAdapter.close());
 
   app.setGlobalPrefix('api/v1');
-  app.use(createStaffSessionMiddleware(config));
+  app.use(requestContextMiddleware);
+  app.use(staffSessionMiddleware);
   app.enableCors({
     origin: (config.get<string>('CORS_ORIGINS') ?? '')
       .split(',')
@@ -27,7 +42,7 @@ export async function createApplication(): Promise<INestApplication> {
       forbidNonWhitelisted: true,
     }),
   );
-  app.useGlobalFilters(new ApiExceptionFilter());
+  app.useGlobalFilters(new ApiExceptionFilter(config));
 
   return app;
 }

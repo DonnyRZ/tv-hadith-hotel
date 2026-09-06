@@ -13,6 +13,7 @@
   "dependencies": {
     "@room-service/api-client": "workspace:*",
     "@room-service/translations": "workspace:*",
+    "@tanstack/query-core": "^5.102.8",
     "@tanstack/react-query": "^5.102.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

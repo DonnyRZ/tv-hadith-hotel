@@ -26,6 +26,13 @@ export interface ResolvedGuestContext {
   source: 'QR' | 'TV';
 }
 
+export interface GuestStay {
+  checkInAt: string;
+  checkOutAt: string;
+  totalDays: number;
+  timeZone: string;
+}
+
 export interface GuestContextResponse {
   room: RoomReference;
   roomStatus: 'OCCUPIED';
@@ -34,10 +41,16 @@ export interface GuestContextResponse {
     guestName: string;
     personalized: true;
   };
+  stay: GuestStay;
   availableUnits: UnitCode[];
 }
 
-export type GuestRequestResponse = Omit<RequestRecord, 'room' | 'guestAssignmentId'>;
+export type GuestRequestResponse = Omit<RequestRecord, 'room' | 'guestAssignmentId' | 'guestName'>;
+
+export interface GuestRequestGroupResponse {
+  clientRequestId: string;
+  requests: GuestRequestResponse[];
+}
 
 export interface GuestQrTokenRecord {
   id: string;

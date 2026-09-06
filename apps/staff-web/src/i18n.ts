@@ -133,6 +133,7 @@ export interface ReceptionistCopy {
   pageTitle: string;
   mainNavigation: string;
   rooms: string;
+  housekeeping: string;
   room: string;
   searchRooms: string;
   searchPlaceholder: string;
@@ -176,6 +177,7 @@ export interface ReceptionistCopy {
   loading: string;
   errorLoading: string;
   retry: string;
+  refresh: string;
   sessionExpired: string;
   apiError: string;
   roomConflict: string;
@@ -183,6 +185,7 @@ export interface ReceptionistCopy {
   assignSuccess: string;
   updateSuccess: string;
   checkoutSuccess: string;
+  realtimeUpdated: string;
   showingRange: (from: string, to: string, total: number) => string;
   pagination: string;
   previousPage: string;
@@ -191,6 +194,45 @@ export interface ReceptionistCopy {
   pageOf: (page: number, totalPages: number) => string;
   noRooms: string;
   noRoomsDescription: string;
+  folio: string;
+  folioSubtitle: string;
+  currentStay: string;
+  pastStays: string;
+  folioTotal: string;
+  totalIncomplete: string;
+  priceUnavailable: string;
+  noOrders: string;
+  noOrdersDescription: string;
+  loadingFolio: string;
+  folioError: string;
+  orders: string;
+  openOrders: string;
+  items: string;
+  lastOrder: string;
+  unit: string;
+  requestedAt: string;
+  status: string;
+  guestNote: string;
+  noNote: string;
+  roomAccess: string;
+  roomAccessDescription: string;
+  openRoomAccess: string;
+  historyEmpty: string;
+  historyEmptyDescription: string;
+  viewStay: string;
+  guest: string;
+  orderDetails: string;
+  orderId: string;
+  quantity: string;
+  lineTotal: string;
+  statusNew: string;
+  statusInProcess: string;
+  statusCompleted: string;
+  statusCancelled: string;
+  totalOrders: (count: number) => string;
+  totalItems: (count: number) => string;
+  stayPeriod: string;
+  checkedOutAt: string;
   tvSection: string;
   tvDescription: string;
   tvStatus: string;
@@ -214,6 +256,23 @@ export interface ReceptionistCopy {
   tvRevokeSuccess: string;
   tvRoomAlreadyPaired: string;
   tvPairingExpired: string;
+  tvPairingCodeNotFound: string;
+  tvPairingAlreadyUsed: string;
+  tvRoomMismatch: string;
+  tvPermissionDenied: string;
+  tvApiProxyMissing: string;
+  tvApiUnavailable: string;
+  tvTechnicalDetails: string;
+  tvHttpStatus: string;
+  tvErrorCode: string;
+  tvRequestId: string;
+  tvEnvironment: string;
+  tvReleaseId: string;
+  tvApiEndpoint: string;
+  tvApiMode: string;
+  tvApiModeSameOrigin: string;
+  tvServerMessage: string;
+  tvUnknownValue: string;
   tvDeviceModel: string;
   tvAppVersion: string;
   qrSection: string;
@@ -347,6 +406,7 @@ export interface OperationalCopy {
   filterStatus: string;
   unit: string;
   room: string;
+  guest: string;
   roomPlaceholder: string;
   applyFilters: string;
   clearFilters: string;
@@ -484,6 +544,7 @@ export interface SuperadminCopy {
   permissionGroupOperations: string;
   permissionGroupDepartment: string;
   permissionGroupCatalog: string;
+  permissionGroupBoutique: string;
   saveRole: string;
   deleteRole: string;
   deleteRoleTitle: string;
@@ -565,6 +626,7 @@ export const translations: Record<Language, AuthCopy> = {
       HOUSEKEEPING: 'Xonalarni tozalash',
       BEAUTY_AND_SALON: 'Go‘zallik va salon',
       CAFE: 'Kafe',
+      BUTIK_INDONESIA: 'Butik Indonesia',
     },
     cafe: {
       pageTitle: 'Menyu boshqaruvi | Hadith Hotel',
@@ -776,6 +838,7 @@ export const translations: Record<Language, AuthCopy> = {
       permissionGroupOperations: 'So‘rovlar va ish jarayoni',
       permissionGroupDepartment: 'Bo‘lim va mehmonlar',
       permissionGroupCatalog: 'Menyu va kontent',
+      permissionGroupBoutique: 'Butik Indonesia',
       saveRole: 'Rolni saqlash',
       deleteRole: 'Rolni o‘chirish',
       deleteRoleTitle: 'Rolni o‘chirasizmi?',
@@ -819,6 +882,10 @@ export const translations: Record<Language, AuthCopy> = {
           label: 'Xonalarni ko‘rish',
           description: 'Xonalar va ularning holatini ko‘rish.',
         },
+        'receptionist:folio:view': {
+          label: 'Xona foliosini ko‘rish',
+          description: 'Faol mehmonning barcha bo‘lim buyurtmalarini ko‘rish.',
+        },
         'receptionist:guest:assign': {
           label: 'Mehmonni biriktirish',
           description: 'Mehmonni xonaga biriktirish.',
@@ -839,6 +906,18 @@ export const translations: Record<Language, AuthCopy> = {
           label: 'Menyuni boshqarish',
           description: 'Menyu pozitsiyalarini tahrirlash.',
         },
+        'request:cancel': {
+          label: 'So‘rovni bekor qilish',
+          description: 'Butik buyurtmasini bekor qilish va band qilingan stokni bo‘shatish.',
+        },
+        'inventory:manage': {
+          label: 'Stokni boshqarish',
+          description: 'Stokni tuzatish va o‘zgarishlar jurnalini ko‘rish.',
+        },
+        'media:manage': {
+          label: 'Rasmlarni boshqarish',
+          description: 'Katalog rasmlarini yuklash.',
+        },
         'user:manage': {
           label: 'Foydalanuvchilarni boshqarish',
           description: 'Xodim hisoblarini yaratish va boshqarish.',
@@ -851,19 +930,22 @@ export const translations: Record<Language, AuthCopy> = {
       roleDescriptions: {
         SUPERADMIN: 'Xodimlar hisobi va kirish rollarini boshqaradi.',
         ROOM_MANAGER: 'Tasdiqlangan mehmonxona bo‘limlari so‘rovlarini kuzatadi.',
-        RECEPTIONIST: 'Mehmon, xona, checkout va TV biriktirish jarayonlarini boshqaradi.',
+        RECEPTIONIST:
+          'Mehmon, xona, checkout, TV biriktirish va housekeeping so‘rovlarini boshqaradi.',
         SPA: 'SPA so‘rovlarini va xizmatlar katalogini boshqaradi.',
         RESTAURANT: 'Restoran so‘rovlarini boshqaradi.',
         LOUNGE: 'Lounge so‘rovlarini boshqaradi.',
         HOUSEKEEPING: 'Housekeeping so‘rovlarini boshqaradi.',
         BEAUTY_AND_SALON: 'Go‘zallik va salon so‘rovlari hamda xizmatlar katalogini boshqaradi.',
         CAFE: 'Kafe so‘rovlari va menyu katalogini boshqaradi.',
+        BUTIK_INDONESIA: 'Butik Indonesia buyurtmalari, katalogi va stokini boshqaradi.',
       },
     },
     receptionist: {
       pageTitle: 'Xonalar | Hadith Hotel',
       mainNavigation: 'Asosiy navigatsiya',
       rooms: 'Xonalar',
+      housekeeping: 'Housekeeping',
       room: 'Xona',
       searchRooms: 'Qidirish',
       searchPlaceholder: 'Xona raqami yoki mehmon nomi bo‘yicha qidiring',
@@ -907,6 +989,7 @@ export const translations: Record<Language, AuthCopy> = {
       loading: 'Yuklanmoqda…',
       errorLoading: 'Xonalar ma’lumotini yuklab bo‘lmadi.',
       retry: 'Qayta urinish',
+      refresh: 'Yangilash',
       sessionExpired: 'Sessiya tugadi. Qayta kiring.',
       apiError: 'Amalni bajarib bo‘lmadi. Qayta urinib ko‘ring.',
       roomConflict: 'Xona allaqachon band. Panelni yangilang va qayta urinib ko‘ring.',
@@ -914,6 +997,7 @@ export const translations: Record<Language, AuthCopy> = {
       assignSuccess: 'Mehmon xonaga biriktirildi.',
       updateSuccess: 'Mehmon ma’lumoti yangilandi.',
       checkoutSuccess: 'Mehmon checkout qilindi.',
+      realtimeUpdated: 'Xonalar avtomatik yangilandi.',
       showingRange: (from, to, total) => `${from}–${to} / ${total} ta xona`,
       pagination: 'Sahifalash',
       previousPage: 'Oldingi',
@@ -922,6 +1006,45 @@ export const translations: Record<Language, AuthCopy> = {
       pageOf: (page, totalPages) => `${page} / ${totalPages}-sahifa`,
       noRooms: 'Xonalar topilmadi',
       noRoomsDescription: 'Qidiruvni o‘zgartirib ko‘ring.',
+      folio: 'Xona foliosi',
+      folioSubtitle: 'Faol mehmonning barcha xizmat buyurtmalari',
+      currentStay: 'Joriy turar joy',
+      pastStays: 'Avvalgi turar joylar',
+      folioTotal: 'Folio jami',
+      totalIncomplete: 'Jami to‘liq emas',
+      priceUnavailable: 'Narx mavjud emas',
+      noOrders: 'Hali buyurtmalar yo‘q',
+      noOrdersDescription: 'Bu mehmon turar joyi uchun xizmat buyurtmalari ko‘rinadi.',
+      loadingFolio: 'Folio yuklanmoqda…',
+      folioError: 'Folio ma’lumotini yuklab bo‘lmadi.',
+      orders: 'Buyurtmalar',
+      openOrders: 'Ochiq buyurtmalar',
+      items: 'Mahsulotlar',
+      lastOrder: 'So‘nggi buyurtma',
+      unit: 'Bo‘lim',
+      requestedAt: 'So‘ralgan vaqt',
+      status: 'Holat',
+      guestNote: 'Mehmon izohi',
+      noNote: 'Izoh yo‘q',
+      roomAccess: 'Xona boshqaruvi',
+      roomAccessDescription: 'Mehmon, QR va TV sozlamalari alohida boshqariladi.',
+      openRoomAccess: 'Xona boshqaruvini ochish',
+      historyEmpty: 'Avvalgi turar joylar yo‘q',
+      historyEmptyDescription: 'Checkout qilingan mehmonlar tarixi shu yerda ko‘rinadi.',
+      viewStay: 'Turar joyni ko‘rish',
+      guest: 'Mehmon',
+      orderDetails: 'Buyurtma tafsilotlari',
+      orderId: 'Buyurtma ID',
+      quantity: 'Miqdor',
+      lineTotal: 'Jami',
+      statusNew: 'Yangi',
+      statusInProcess: 'Jarayonda',
+      statusCompleted: 'Yakunlangan',
+      statusCancelled: 'Bekor qilingan',
+      totalOrders: (count) => `${count} ta buyurtma`,
+      totalItems: (count) => `${count} ta mahsulot`,
+      stayPeriod: 'Turar joy davri',
+      checkedOutAt: 'Checkout vaqti',
       tvSection: 'TV qurilmasi',
       tvDescription: 'TV ekranidagi kodni kiriting va uni shu xonaga biriktiring.',
       tvStatus: 'TV holati',
@@ -945,6 +1068,23 @@ export const translations: Record<Language, AuthCopy> = {
       tvRevokeSuccess: 'TV credentiali bekor qilindi.',
       tvRoomAlreadyPaired: 'Bu xonada faol TV allaqachon biriktirilgan.',
       tvPairingExpired: 'Pairing kodi eskirgan. TV da yangi kodni oching.',
+      tvPairingCodeNotFound: 'Pairing kodi topilmadi. TV dagi kod hali faol ekanini tekshiring.',
+      tvPairingAlreadyUsed: 'Pairing kodi allaqachon ishlatilgan. TV da yangi kod oching.',
+      tvRoomMismatch: 'TV kodi boshqa xonaga tegishli yoki xona ma’lumoti mos emas.',
+      tvPermissionDenied: 'Bu amal uchun permission yetarli emas.',
+      tvApiProxyMissing: 'Staff Web API proxy sozlanmagan. IT supportga murojaat qiling.',
+      tvApiUnavailable: 'API yoki proxy mavjud emas. Tarmoq va production xizmatini tekshiring.',
+      tvTechnicalDetails: 'Texnik tafsilotlar',
+      tvHttpStatus: 'HTTP status',
+      tvErrorCode: 'Xato kodi',
+      tvRequestId: 'Request ID',
+      tvEnvironment: 'Environment',
+      tvReleaseId: 'Release ID',
+      tvApiEndpoint: 'API endpoint',
+      tvApiMode: 'API rejimi',
+      tvApiModeSameOrigin: 'Same-origin /api/v1 proxy',
+      tvServerMessage: 'Server xabari',
+      tvUnknownValue: 'Noma’lum',
       tvDeviceModel: 'Model',
       tvAppVersion: 'Ilova versiyasi',
       qrSection: 'Mehmon QR kodi',
@@ -1027,6 +1167,7 @@ export const translations: Record<Language, AuthCopy> = {
       HOUSEKEEPING: 'Хаускипинг',
       BEAUTY_AND_SALON: 'Красота и салон',
       CAFE: 'Кафе',
+      BUTIK_INDONESIA: 'Butik Indonesia',
     },
     cafe: {
       pageTitle: 'Управление меню | Hadith Hotel',
@@ -1237,6 +1378,7 @@ export const translations: Record<Language, AuthCopy> = {
       permissionGroupOperations: 'Запросы и рабочие процессы',
       permissionGroupDepartment: 'Отдел и гости',
       permissionGroupCatalog: 'Меню и контент',
+      permissionGroupBoutique: 'Butik Indonesia',
       saveRole: 'Сохранить роль',
       deleteRole: 'Удалить роль',
       deleteRoleTitle: 'Удалить роль?',
@@ -1280,6 +1422,10 @@ export const translations: Record<Language, AuthCopy> = {
           label: 'Просмотр номеров',
           description: 'Просмотр номеров и их статуса.',
         },
+        'receptionist:folio:view': {
+          label: 'Просмотр фолио номера',
+          description: 'Просмотр заказов текущего гостя из всех отделов.',
+        },
         'receptionist:guest:assign': {
           label: 'Назначение гостя',
           description: 'Назначить гостя номеру.',
@@ -1297,6 +1443,18 @@ export const translations: Record<Language, AuthCopy> = {
           label: 'Управление меню',
           description: 'Изменять позиции меню.',
         },
+        'request:cancel': {
+          label: 'Отмена запросов',
+          description: 'Отменять заказы Butik Indonesia и освобождать резерв.',
+        },
+        'inventory:manage': {
+          label: 'Управление остатками',
+          description: 'Корректировать остатки и просматривать журнал изменений.',
+        },
+        'media:manage': {
+          label: 'Управление изображениями',
+          description: 'Загружать изображения каталога.',
+        },
         'user:manage': {
           label: 'Управление пользователями',
           description: 'Создавать и управлять учетными записями сотрудников.',
@@ -1309,19 +1467,22 @@ export const translations: Record<Language, AuthCopy> = {
       roleDescriptions: {
         SUPERADMIN: 'Управляет учетными записями сотрудников и ролями доступа.',
         ROOM_MANAGER: 'Отслеживает запросы утвержденных отделов отеля.',
-        RECEPTIONIST: 'Управляет гостями, номерами, checkout и подключением TV.',
+        RECEPTIONIST:
+          'Управляет гостями, номерами, checkout, подключением TV и запросами хаускипинга.',
         SPA: 'Управляет запросами SPA и каталогом услуг.',
         RESTAURANT: 'Управляет запросами ресторана.',
         LOUNGE: 'Управляет запросами лаунжа.',
         HOUSEKEEPING: 'Управляет запросами хаускипинга.',
         BEAUTY_AND_SALON: 'Управляет запросами и каталогом услуг красоты и салона.',
         CAFE: 'Управляет запросами и каталогом меню кафе.',
+        BUTIK_INDONESIA: 'Управляет заказами, каталогом и остатками Butik Indonesia.',
       },
     },
     receptionist: {
       pageTitle: 'Номера | Hadith Hotel',
       mainNavigation: 'Основная навигация',
       rooms: 'Номера',
+      housekeeping: 'Хаускипинг',
       room: 'Номер',
       searchRooms: 'Поиск',
       searchPlaceholder: 'Поиск по номеру или имени гостя',
@@ -1366,6 +1527,7 @@ export const translations: Record<Language, AuthCopy> = {
       loading: 'Загрузка…',
       errorLoading: 'Не удалось загрузить данные номеров.',
       retry: 'Повторить',
+      refresh: 'Обновить',
       sessionExpired: 'Сессия истекла. Войдите снова.',
       apiError: 'Не удалось выполнить действие. Повторите попытку.',
       roomConflict: 'Номер уже занят. Обновите панель и попробуйте снова.',
@@ -1373,6 +1535,7 @@ export const translations: Record<Language, AuthCopy> = {
       assignSuccess: 'Гость назначен в номер.',
       updateSuccess: 'Данные гостя обновлены.',
       checkoutSuccess: 'Выезд гостя оформлен.',
+      realtimeUpdated: 'Номера автоматически обновлены.',
       showingRange: (from, to, total) => `${from}–${to} из ${total} номеров`,
       pagination: 'Пагинация',
       previousPage: 'Назад',
@@ -1381,6 +1544,45 @@ export const translations: Record<Language, AuthCopy> = {
       pageOf: (page, totalPages) => `Страница ${page} из ${totalPages}`,
       noRooms: 'Номера не найдены',
       noRoomsDescription: 'Измените поисковый запрос и попробуйте снова.',
+      folio: 'Фолио номера',
+      folioSubtitle: 'Все сервисные заказы текущего гостя',
+      currentStay: 'Текущее проживание',
+      pastStays: 'Прошлые проживания',
+      folioTotal: 'Итого по фолио',
+      totalIncomplete: 'Итог неполный',
+      priceUnavailable: 'Цена недоступна',
+      noOrders: 'Заказов пока нет',
+      noOrdersDescription: 'Здесь появятся сервисные заказы текущего гостя.',
+      loadingFolio: 'Загрузка фолио…',
+      folioError: 'Не удалось загрузить данные фолио.',
+      orders: 'Заказы',
+      openOrders: 'Открытые заказы',
+      items: 'Позиции',
+      lastOrder: 'Последний заказ',
+      unit: 'Отдел',
+      requestedAt: 'Время заказа',
+      status: 'Статус',
+      guestNote: 'Примечание гостя',
+      noNote: 'Без примечания',
+      roomAccess: 'Управление номером',
+      roomAccessDescription: 'Гость, QR и TV настраиваются в отдельном разделе.',
+      openRoomAccess: 'Открыть управление номером',
+      historyEmpty: 'Прошлых проживаний нет',
+      historyEmptyDescription: 'Здесь появится история гостей после checkout.',
+      viewStay: 'Открыть проживание',
+      guest: 'Гость',
+      orderDetails: 'Детали заказа',
+      orderId: 'ID заказа',
+      quantity: 'Количество',
+      lineTotal: 'Итого',
+      statusNew: 'Новый',
+      statusInProcess: 'В работе',
+      statusCompleted: 'Завершён',
+      statusCancelled: 'Отменён',
+      totalOrders: (count) => `${count} заказов`,
+      totalItems: (count) => `${count} позиций`,
+      stayPeriod: 'Период проживания',
+      checkedOutAt: 'Время checkout',
       tvSection: 'TV устройства',
       tvDescription: 'Введите код на экране TV и привяжите устройство к этому номеру.',
       tvStatus: 'Статус TV',
@@ -1404,6 +1606,23 @@ export const translations: Record<Language, AuthCopy> = {
       tvRevokeSuccess: 'Credential TV отозван.',
       tvRoomAlreadyPaired: 'К этому номеру уже привязан активный TV.',
       tvPairingExpired: 'Срок кода истёк. Откройте новый код на TV.',
+      tvPairingCodeNotFound: 'Код pairing не найден. Проверьте, что код на TV ещё активен.',
+      tvPairingAlreadyUsed: 'Код pairing уже использован. Откройте новый код на TV.',
+      tvRoomMismatch: 'Код TV относится к другому номеру или данные номера не совпадают.',
+      tvPermissionDenied: 'У этой учётной записи нет нужного разрешения.',
+      tvApiProxyMissing: 'Прокси API Staff Web не настроен. Обратитесь в IT-поддержку.',
+      tvApiUnavailable: 'API или прокси недоступны. Проверьте сеть и production-сервис.',
+      tvTechnicalDetails: 'Технические сведения',
+      tvHttpStatus: 'HTTP status',
+      tvErrorCode: 'Код ошибки',
+      tvRequestId: 'Request ID',
+      tvEnvironment: 'Environment',
+      tvReleaseId: 'Release ID',
+      tvApiEndpoint: 'API endpoint',
+      tvApiMode: 'Режим API',
+      tvApiModeSameOrigin: 'Same-origin proxy /api/v1',
+      tvServerMessage: 'Сообщение сервера',
+      tvUnknownValue: 'Неизвестно',
       tvDeviceModel: 'Модель',
       tvAppVersion: 'Версия приложения',
       qrSection: 'QR-код гостя',
@@ -1484,6 +1703,7 @@ export const translations: Record<Language, AuthCopy> = {
       HOUSEKEEPING: 'Housekeeping',
       BEAUTY_AND_SALON: 'Beauty & Salon',
       CAFE: 'Cafe',
+      BUTIK_INDONESIA: 'Butik Indonesia',
     },
     cafe: {
       pageTitle: 'Menu management | Hadith Hotel',
@@ -1695,6 +1915,7 @@ export const translations: Record<Language, AuthCopy> = {
       permissionGroupOperations: 'Requests & workflow',
       permissionGroupDepartment: 'Department & guests',
       permissionGroupCatalog: 'Menu & content',
+      permissionGroupBoutique: 'Butik Indonesia',
       saveRole: 'Save role',
       deleteRole: 'Delete role',
       deleteRoleTitle: 'Delete this role?',
@@ -1738,6 +1959,10 @@ export const translations: Record<Language, AuthCopy> = {
           label: 'View rooms',
           description: 'View rooms and their current status.',
         },
+        'receptionist:folio:view': {
+          label: 'View room folios',
+          description: 'View the current guest’s orders across every unit.',
+        },
         'receptionist:guest:assign': {
           label: 'Assign guests',
           description: 'Assign a guest to a room.',
@@ -1755,6 +1980,18 @@ export const translations: Record<Language, AuthCopy> = {
           description: 'Pair or reset a Smart TV device.',
         },
         'menu:manage': { label: 'Manage menus', description: 'Edit menu items.' },
+        'request:cancel': {
+          label: 'Cancel requests',
+          description: 'Cancel Butik Indonesia orders and release reservations.',
+        },
+        'inventory:manage': {
+          label: 'Manage inventory',
+          description: 'Adjust stock and review the movement ledger.',
+        },
+        'media:manage': {
+          label: 'Manage media',
+          description: 'Upload catalog imagery.',
+        },
         'user:manage': { label: 'Manage users', description: 'Create and manage staff accounts.' },
         'role:manage': {
           label: 'Manage roles',
@@ -1764,19 +2001,21 @@ export const translations: Record<Language, AuthCopy> = {
       roleDescriptions: {
         SUPERADMIN: 'Manages staff accounts and access roles.',
         ROOM_MANAGER: 'Monitors requests across approved hotel departments.',
-        RECEPTIONIST: 'Manages guests, rooms, checkout, and TV pairing.',
+        RECEPTIONIST: 'Manages guests, rooms, checkout, TV pairing, and Housekeeping requests.',
         SPA: 'Manages SPA requests and the service catalog.',
         RESTAURANT: 'Manages restaurant requests.',
         LOUNGE: 'Manages lounge requests.',
         HOUSEKEEPING: 'Manages housekeeping requests.',
         BEAUTY_AND_SALON: 'Manages beauty and salon requests and the service catalog.',
         CAFE: 'Manages cafe requests and the menu catalog.',
+        BUTIK_INDONESIA: 'Manages Butik Indonesia orders, catalog, and inventory.',
       },
     },
     receptionist: {
       pageTitle: 'Rooms | Hadith Hotel',
       mainNavigation: 'Main navigation',
       rooms: 'Rooms',
+      housekeeping: 'Housekeeping',
       room: 'Room',
       searchRooms: 'Search rooms',
       searchPlaceholder: 'Search room number or guest name',
@@ -1820,6 +2059,7 @@ export const translations: Record<Language, AuthCopy> = {
       loading: 'Loading…',
       errorLoading: 'Could not load room data.',
       retry: 'Retry',
+      refresh: 'Refresh',
       sessionExpired: 'Session expired. Please sign in again.',
       apiError: 'The action could not be completed. Try again.',
       roomConflict: 'This room is already occupied. Refresh the board and try again.',
@@ -1827,6 +2067,7 @@ export const translations: Record<Language, AuthCopy> = {
       assignSuccess: 'Guest assigned to the room.',
       updateSuccess: 'Guest details updated.',
       checkoutSuccess: 'Guest checked out.',
+      realtimeUpdated: 'Rooms updated automatically.',
       showingRange: (from, to, total) => `${from}–${to} of ${total} rooms`,
       pagination: 'Pagination',
       previousPage: 'Previous',
@@ -1835,6 +2076,45 @@ export const translations: Record<Language, AuthCopy> = {
       pageOf: (page, totalPages) => `Page ${page} of ${totalPages}`,
       noRooms: 'No rooms found',
       noRoomsDescription: 'Change your search and try again.',
+      folio: 'Room folio',
+      folioSubtitle: 'Every service order for the current stay',
+      currentStay: 'Current stay',
+      pastStays: 'Past stays',
+      folioTotal: 'Folio total',
+      totalIncomplete: 'Total incomplete',
+      priceUnavailable: 'Price unavailable',
+      noOrders: 'No orders yet',
+      noOrdersDescription: 'Service orders for this guest stay will appear here.',
+      loadingFolio: 'Loading folio…',
+      folioError: 'Could not load folio data.',
+      orders: 'Orders',
+      openOrders: 'Open orders',
+      items: 'Items',
+      lastOrder: 'Last order',
+      unit: 'Unit',
+      requestedAt: 'Requested at',
+      status: 'Status',
+      guestNote: 'Guest note',
+      noNote: 'No note',
+      roomAccess: 'Room access',
+      roomAccessDescription: 'Guest, QR, and TV controls live in a separate area.',
+      openRoomAccess: 'Open room access',
+      historyEmpty: 'No past stays',
+      historyEmptyDescription: 'Checked-out guest history will appear here.',
+      viewStay: 'View stay',
+      guest: 'Guest',
+      orderDetails: 'Order details',
+      orderId: 'Order ID',
+      quantity: 'Quantity',
+      lineTotal: 'Line total',
+      statusNew: 'New',
+      statusInProcess: 'In process',
+      statusCompleted: 'Completed',
+      statusCancelled: 'Cancelled',
+      totalOrders: (count) => `${count} ${count === 1 ? 'order' : 'orders'}`,
+      totalItems: (count) => `${count} ${count === 1 ? 'item' : 'items'}`,
+      stayPeriod: 'Stay period',
+      checkedOutAt: 'Checked out at',
       tvSection: 'TV device',
       tvDescription: 'Enter the code shown on the TV and map it to this room.',
       tvStatus: 'TV status',
@@ -1858,6 +2138,25 @@ export const translations: Record<Language, AuthCopy> = {
       tvRevokeSuccess: 'TV credential revoked.',
       tvRoomAlreadyPaired: 'This room already has an active TV.',
       tvPairingExpired: 'The pairing code expired. Open a new code on the TV.',
+      tvPairingCodeNotFound:
+        'Pairing code not found. Check that the code on the TV is still active.',
+      tvPairingAlreadyUsed: 'This pairing code was already used. Open a new code on the TV.',
+      tvRoomMismatch: 'The TV code belongs to another room or the room details do not match.',
+      tvPermissionDenied: 'This account does not have the required permission.',
+      tvApiProxyMissing: 'The Staff Web API proxy is not configured. Contact IT support.',
+      tvApiUnavailable:
+        'The API or proxy is unavailable. Check the network and production service.',
+      tvTechnicalDetails: 'Technical details',
+      tvHttpStatus: 'HTTP status',
+      tvErrorCode: 'Error code',
+      tvRequestId: 'Request ID',
+      tvEnvironment: 'Environment',
+      tvReleaseId: 'Release ID',
+      tvApiEndpoint: 'API endpoint',
+      tvApiMode: 'API mode',
+      tvApiModeSameOrigin: 'Same-origin /api/v1 proxy',
+      tvServerMessage: 'Server message',
+      tvUnknownValue: 'Unknown',
       tvDeviceModel: 'Model',
       tvAppVersion: 'App version',
       qrSection: 'Guest QR code',
@@ -2362,6 +2661,7 @@ export const operationalCopy: Record<Language, OperationalCopy> = {
     filterStatus: 'Holat',
     unit: 'Bo‘lim',
     room: 'Xona',
+    guest: 'Mehmon',
     roomPlaceholder: 'Xona raqami bo‘yicha qidiring',
     applyFilters: 'Qo‘llash',
     clearFilters: 'Filtrni tozalash',
@@ -2462,6 +2762,7 @@ export const operationalCopy: Record<Language, OperationalCopy> = {
     filterStatus: 'Статус',
     unit: 'Отдел',
     room: 'Номер',
+    guest: 'Гость',
     roomPlaceholder: 'Поиск по номеру комнаты',
     applyFilters: 'Применить',
     clearFilters: 'Сбросить фильтр',
@@ -2562,6 +2863,7 @@ export const operationalCopy: Record<Language, OperationalCopy> = {
     filterStatus: 'Status',
     unit: 'Department',
     room: 'Room',
+    guest: 'Guest',
     roomPlaceholder: 'Search by room number',
     applyFilters: 'Apply',
     clearFilters: 'Clear filters',
