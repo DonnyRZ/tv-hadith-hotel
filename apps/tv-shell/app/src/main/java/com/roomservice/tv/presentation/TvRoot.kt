@@ -237,20 +237,14 @@ private suspend fun requestTvFocus(focusRequester: FocusRequester) {
 
 @Composable
 private fun HotelMark(size: Dp = 52.dp) {
-    Box(
+    Image(
+        painter = painterResource(R.drawable.hadith_hotel_mark),
+        contentDescription = "Hadith Hotel emblem",
+        contentScale = ContentScale.Fit,
         modifier = Modifier
-            .size(size)
-            .border(1.dp, TvFocused, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "H",
-            color = TvFocused,
-            fontFamily = HotelDisplayFont,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
+            .width(size * 2.22f)
+            .height(size),
+    )
 }
 
 @Composable
@@ -648,7 +642,7 @@ private fun TvHeader(
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val compactHeader = maxWidth < 1_300.dp
         val actionGap = if (compactHeader) 8.dp else 12.dp
-        val wordmarkWidth = if (compactHeader) 190.dp else 276.dp
+        val wordmarkWidth = if (compactHeader) 260.dp else 360.dp
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -660,14 +654,14 @@ private fun TvHeader(
                 modifier = Modifier.width(wordmarkWidth),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                HotelMark()
+                HotelMark(size = if (compactHeader) 42.dp else 54.dp)
                 Spacer(modifier = Modifier.width(if (compactHeader) 12.dp else 16.dp))
                 val brand = stringResource(R.string.tv_brand)
                 val brandLineOne = brand.substringBefore(' ').ifBlank { brand }
                 val brandLineTwo = brand.substringAfter(' ', "").ifBlank { brandLineOne }
                 Column(
                     modifier = Modifier
-                        .width(if (compactHeader) 140.dp else 210.dp)
+                        .width(if (compactHeader) 148.dp else 220.dp)
                         .semantics { contentDescription = brand },
                     verticalArrangement = Arrangement.Center,
                 ) {

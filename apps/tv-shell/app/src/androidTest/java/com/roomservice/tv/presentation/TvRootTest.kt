@@ -10,6 +10,7 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyPress
@@ -67,6 +68,7 @@ class TvRootTest {
         composeRule.onNodeWithText("STAY").assertIsDisplayed()
         composeRule.onNodeWithText("HADITH").assertIsDisplayed()
         composeRule.onNodeWithText("HOTEL").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Hadith Hotel emblem").assertIsDisplayed()
         composeRule.onAllNodesWithText("HADITH HOTEL").assertCountEquals(0)
         composeRule.onNodeWithText("Home").assertIsDisplayed()
         composeRule.onNodeWithText("Service").assertIsDisplayed()
