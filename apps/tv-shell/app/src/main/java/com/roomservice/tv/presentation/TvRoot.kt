@@ -658,16 +658,34 @@ private fun TvHeader(
             ) {
                 HotelMark()
                 Spacer(modifier = Modifier.width(if (compactHeader) 12.dp else 16.dp))
-                Text(
-                    text = stringResource(R.string.tv_brand),
-                    color = TvIvory,
-                    fontFamily = HotelDisplayFont,
-                    fontSize = if (compactHeader) 26.sp else 30.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 2.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val brand = stringResource(R.string.tv_brand)
+                val brandLineOne = brand.substringBefore(' ').ifBlank { brand }
+                val brandLineTwo = brand.substringAfter(' ', "").ifBlank { brandLineOne }
+                Column(
+                    modifier = Modifier
+                        .width(if (compactHeader) 140.dp else 210.dp)
+                        .semantics { contentDescription = brand },
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = brandLineOne,
+                        color = TvIvory,
+                        fontFamily = HotelDisplayFont,
+                        fontSize = if (compactHeader) 20.sp else 25.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = if (compactHeader) 1.5.sp else 2.sp,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = brandLineTwo,
+                        color = TvIvory,
+                        fontFamily = HotelDisplayFont,
+                        fontSize = if (compactHeader) 20.sp else 25.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = if (compactHeader) 1.5.sp else 2.sp,
+                        maxLines = 1,
+                    )
+                }
             }
             TvLanguageSwitcher(
                 language = language,
