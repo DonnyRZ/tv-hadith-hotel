@@ -163,6 +163,14 @@ async function checkManifest(base, label, expected) {
   const response = await request(endpoint(base, '/tv/update-manifest'));
   const manifest = await readJson(response, `${label} TV update manifest`);
   assert(response.status === 200, `${label} TV update manifest returned HTTP ${response.status}`);
+  assert(
+    (response.headers.get('cache-control') ?? '').toLowerCase().includes('no-store'),
+    `${label} TV update manifest is cacheable`,
+  );
+  assert(
+    (response.headers.get('pragma') ?? '').toLowerCase() === 'no-cache',
+    `${label} TV update manifest is missing Pragma: no-cache`,
+  );
   assertManifest(manifest, expected);
   return manifest;
 }

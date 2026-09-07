@@ -93,7 +93,7 @@
     <string name="tv_update_ready_message">EGI TV %1$s versiyaga yangilanishga tayyor. O‘rnatish uchun davom eting.</string>
     <string name="tv_update_permission_message">Yangilanishni o‘rnatish uchun Android sozlamalarida EGI TV ga ruxsat bering.</string>
     <string name="tv_update_failed">Yangilanish tayyorlanmadi</string>
-    <string name="tv_update_failed_message">Yangilanishni xavfsiz tayyorlab bo‘lmadi. Qayta urinib ko‘ring.</string>
+    <string name="tv_update_failed_message">Yangilanish tayyorlanmadi: %1$s</string>
     <string name="tv_update_install">O‘rnatish</string>
     <string name="tv_update_open_settings">Sozlamalarni ochish</string>
     <string name="tv_update_retry">Qayta urinish</string>

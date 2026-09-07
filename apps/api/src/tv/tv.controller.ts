@@ -49,7 +49,8 @@ export class TvController {
   }
 
   @Get('update-manifest')
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', 'no-store, no-cache')
+  @Header('Pragma', 'no-cache')
   public getUpdateManifest() {
     return this.tvService.getUpdateManifest();
   }

@@ -12,6 +12,9 @@ enum class TvUpdateCheckTrigger {
 
 internal fun TvUpdateCheckTrigger.isForced(): Boolean = this != TvUpdateCheckTrigger.BACKGROUND
 
+internal fun TvUpdateCheckTrigger.shouldRespectDismissedRelease(): Boolean =
+    this != TvUpdateCheckTrigger.MANUAL
+
 internal fun shouldSkipTvUpdateCheck(
     force: Boolean,
     nowMillis: Long,

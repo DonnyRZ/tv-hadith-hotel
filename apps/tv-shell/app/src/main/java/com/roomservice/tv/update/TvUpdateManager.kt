@@ -13,14 +13,17 @@ import com.roomservice.tv.data.TvApi
 import com.roomservice.tv.data.TvUpdateManifest
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,6 +80,10 @@ class TvUpdateManager(
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .followRedirects(false)
         .followSslRedirects(false)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.MINUTES)
         .build(),
     private val packageManager: PackageManager = context.packageManager,
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
@@ -123,7 +130,12 @@ class TvUpdateManager(
         if (publishState) mutableState.value = TvUpdateState.Checking(trigger)
 
         return try {
-            if (restorePreparedUpdate(publishState)) {
+            if (!force && restorePreparedUpdate(
+                    publishState = publishState,
+                    allowDismissed = trigger == TvUpdateCheckTrigger.MANUAL ||
+                        trigger == TvUpdateCheckTrigger.RETRY,
+                )
+            ) {
                 markSuccessfulCheck()
                 TvUpdateCheckResult.Prepared
             } else {
@@ -155,13 +167,9 @@ class TvUpdateManager(
                         TvUpdateCheckResult.Failed(retryable = false)
                     }
                     is TvUpdateDecision.Available -> {
-                        if (isDismissed(decision.manifest)) {
+                        if (isDismissed(decision.manifest) && trigger.shouldRespectDismissedRelease()) {
                             if (publishState) {
-                                mutableState.value = if (trigger == TvUpdateCheckTrigger.MANUAL) {
-                                    TvUpdateState.UpToDate(BuildConfig.VERSION_NAME)
-                                } else {
-                                    TvUpdateState.Idle
-                                }
+                                mutableState.value = TvUpdateState.Idle
                             }
                             markSuccessfulCheck()
                             TvUpdateCheckResult.NoUpdate
@@ -178,6 +186,14 @@ class TvUpdateManager(
             throw exception
         } catch (exception: Exception) {
             // Update discovery must never block pairing or guest service use.
+            if (force && restorePreparedUpdate(
+                    publishState = publishState,
+                    allowDismissed = trigger == TvUpdateCheckTrigger.MANUAL ||
+                        trigger == TvUpdateCheckTrigger.RETRY,
+                )
+            ) {
+                return TvUpdateCheckResult.Prepared
+            }
             if (publishState && trigger == TvUpdateCheckTrigger.MANUAL) {
                 mutableState.value = TvUpdateState.Failed(
                     message = exception.message ?: "The update check could not be completed.",
@@ -341,7 +357,10 @@ class TvUpdateManager(
             .apply()
     }
 
-    private suspend fun restorePreparedUpdate(publishState: Boolean): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun restorePreparedUpdate(
+        publishState: Boolean,
+        allowDismissed: Boolean,
+    ): Boolean = withContext(Dispatchers.IO) {
         val versionCode = preferences.getInt(KEY_PENDING_VERSION_CODE, 0)
         if (versionCode <= BuildConfig.VERSION_CODE) {
             clearPreparedUpdate()
@@ -363,11 +382,12 @@ class TvUpdateManager(
         )
         val apk = apkPath?.let(::File)
         val apkIsValid = apk != null && verifyDownloadedApk(apk, manifest)
-        if (apk == null || !apkIsValid || isDismissed(manifest)) {
+        if (apk == null || !apkIsValid) {
             if (apk != null && apk.isFile && !apkIsValid) apk.delete()
             clearPreparedUpdate()
             return@withContext false
         }
+        if (isDismissed(manifest) && !allowDismissed) return@withContext false
         if (publishState) mutableState.value = TvUpdateState.Ready(manifest, apk.absolutePath)
         true
     }
@@ -376,7 +396,8 @@ class TvUpdateManager(
         val pendingPath = preferences.getString(KEY_PENDING_APK_PATH, null)
         pendingPath?.let { path ->
             val file = File(path)
-            if (file.isFile && file.parentFile == File(appContext.cacheDir, UPDATES_DIRECTORY)) {
+            val legacyDirectory = File(appContext.cacheDir, UPDATES_DIRECTORY)
+            if (file.isFile && (file.parentFile == updatesDirectory() || file.parentFile == legacyDirectory)) {
                 file.delete()
             }
         }
@@ -393,9 +414,9 @@ class TvUpdateManager(
             .apply()
     }
 
-    private fun downloadOrReuse(manifest: TvUpdateManifest, publishState: Boolean): File {
-        val directory = File(appContext.cacheDir, UPDATES_DIRECTORY).apply {
-            check(mkdirs() || isDirectory) { "The update cache could not be created." }
+    private suspend fun downloadOrReuse(manifest: TvUpdateManifest, publishState: Boolean): File {
+        val directory = updatesDirectory().apply {
+            check(mkdirs() || isDirectory) { "The update storage could not be created." }
         }
         val digest = requireNotNull(manifest.sha256).lowercase(Locale.ROOT)
         val finalFile = File(directory, "egi-tv-${manifest.latestVersionCode}-$digest.apk")
@@ -403,28 +424,109 @@ class TvUpdateManager(
         finalFile.delete()
 
         val temporaryFile = File(directory, "${finalFile.name}.part")
-        temporaryFile.delete()
-        val request = Request.Builder()
+        var lastFailure: Exception? = null
+        repeat(MAX_DOWNLOAD_ATTEMPTS) { attempt ->
+            try {
+                downloadAttempt(manifest, temporaryFile, directory, publishState)
+                if (!verifyDownloadedApk(temporaryFile, manifest)) {
+                    temporaryFile.delete()
+                    throw NonRetryableUpdateException(
+                        "The downloaded update failed integrity or signing verification.",
+                    )
+                }
+                check(temporaryFile.renameTo(finalFile)) {
+                    "The verified update could not be staged."
+                }
+                return finalFile
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: NonRetryableUpdateException) {
+                throw exception
+            } catch (exception: Exception) {
+                lastFailure = exception
+                if (attempt + 1 < MAX_DOWNLOAD_ATTEMPTS) {
+                    delay(DOWNLOAD_RETRY_DELAYS_MS[attempt])
+                }
+            }
+        }
+        lastFailure?.let { throw it }
+            ?: throw IOException("The update download did not complete.")
+    }
+
+    private fun downloadAttempt(
+        manifest: TvUpdateManifest,
+        temporaryFile: File,
+        directory: File,
+        publishState: Boolean,
+    ) {
+        var existingBytes = temporaryFile.length().coerceAtLeast(0L)
+        if (existingBytes > MAX_APK_BYTES) {
+            temporaryFile.delete()
+            existingBytes = 0L
+        }
+
+        val requestBuilder = Request.Builder()
             .url(requireNotNull(manifest.apkUrl))
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
             .get()
-            .build()
-        httpClient.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "The update server returned HTTP ${response.code}." }
-            val body = response.body ?: error("The update response was empty.")
-            val declaredLength = body.contentLength()
-            check(declaredLength <= MAX_APK_BYTES) { "The update file is too large." }
-            var downloaded = 0L
+        if (existingBytes > 0L) requestBuilder.header("Range", "bytes=$existingBytes-")
+
+        httpClient.newCall(requestBuilder.build()).execute().use { response ->
+            if (response.code == 416 && existingBytes > 0L) {
+                temporaryFile.delete()
+                throw IOException("The update range was rejected; restarting the download.")
+            }
+            if (!response.isSuccessful) {
+                val retryable = response.code == 408 || response.code == 429 || response.code >= 500
+                if (retryable) throw IOException("The update server returned HTTP ${response.code}.")
+                throw NonRetryableUpdateException("The update server returned HTTP ${response.code}.")
+            }
+
+            val body = response.body
+                ?: throw NonRetryableUpdateException("The update response was empty.")
+            val range = parseTvUpdateContentRange(response.header("Content-Range"))
+            val append = if (response.code == 206) {
+                if (range?.start != existingBytes) {
+                    temporaryFile.delete()
+                    throw IOException("The update server returned an invalid resume range.")
+                }
+                true
+            } else {
+                false
+            }
+            val startOffset = if (append) existingBytes else 0L
+            if (!append && existingBytes > 0L) temporaryFile.delete()
+
+            val bodyLength = body.contentLength()
+            val totalLength = when {
+                range?.total != null -> range.total
+                bodyLength >= 0L -> startOffset + bodyLength
+                else -> null
+            }
+            if (totalLength != null && totalLength > MAX_APK_BYTES) {
+                throw NonRetryableUpdateException("The update file is too large.")
+            }
+            val requiredBytes = totalLength?.minus(startOffset)?.coerceAtLeast(0L) ?: 0L
+            checkUsableStorage(directory, requiredBytes)
+
+            var downloaded = startOffset
             body.byteStream().use { input ->
-                FileOutputStream(temporaryFile).use { output ->
+                FileOutputStream(temporaryFile, append).use { output ->
                     val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) break
                         downloaded += read
-                        check(downloaded <= MAX_APK_BYTES) { "The update file is too large." }
+                        if (downloaded > MAX_APK_BYTES ||
+                            (totalLength != null && downloaded > totalLength)
+                        ) {
+                            throw NonRetryableUpdateException("The update file is too large.")
+                        }
                         output.write(buffer, 0, read)
-                        val progress = if (declaredLength > 0) {
-                            ((downloaded * 100L) / declaredLength).toInt().coerceIn(0, 99)
+                        checkUsableStorage(directory, MIN_STORAGE_HEADROOM_BYTES)
+                        val progress = if (totalLength != null && totalLength > 0L) {
+                            ((downloaded * 100L) / totalLength).toInt().coerceIn(0, 99)
                         } else {
                             0
                         }
@@ -434,15 +536,21 @@ class TvUpdateManager(
                     }
                 }
             }
+            if (totalLength != null && downloaded != totalLength) {
+                throw IOException("The update download ended before the complete file was received.")
+            }
         }
-
-        check(verifyDownloadedApk(temporaryFile, manifest)) {
-            temporaryFile.delete()
-            "The downloaded update failed integrity or signing verification."
-        }
-        check(temporaryFile.renameTo(finalFile)) { "The verified update could not be staged." }
-        return finalFile
     }
+
+    private fun checkUsableStorage(directory: File, requiredBytes: Long) {
+        if (directory.usableSpace < requiredBytes + MIN_STORAGE_HEADROOM_BYTES) {
+            throw NonRetryableUpdateException(
+                "Not enough TV storage is available for the update.",
+            )
+        }
+    }
+
+    private fun updatesDirectory(): File = File(appContext.filesDir, UPDATES_DIRECTORY)
 
     private fun verifyDownloadedApk(file: File, manifest: TvUpdateManifest): Boolean {
         if (!file.isFile || file.length() <= 0L || file.length() > MAX_APK_BYTES) return false
@@ -514,6 +622,9 @@ class TvUpdateManager(
         const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         const val DOWNLOAD_BUFFER_BYTES = 32 * 1_024
         const val MAX_APK_BYTES = 250L * 1_024L * 1_024L
+        const val MIN_STORAGE_HEADROOM_BYTES = 16L * 1_024L * 1_024L
+        const val MAX_DOWNLOAD_ATTEMPTS = 3
+        val DOWNLOAD_RETRY_DELAYS_MS = longArrayOf(2_000L, 5_000L)
         const val KEY_LAST_CHECK_AT = "last_check_at"
         const val KEY_LAST_ATTEMPT_AT = "last_attempt_at"
         const val KEY_DISMISSED_RELEASE_ID = "dismissed_release_id"
@@ -530,3 +641,5 @@ class TvUpdateManager(
         const val UPDATES_DIRECTORY = "updates"
     }
 }
+
+private class NonRetryableUpdateException(message: String) : IOException(message)

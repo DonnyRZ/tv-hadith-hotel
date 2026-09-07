@@ -88,4 +88,11 @@ class TvUpdateCheckPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `manual check does not hide a previously dismissed release`() {
+        assertFalse(TvUpdateCheckTrigger.MANUAL.shouldRespectDismissedRelease())
+        assertTrue(TvUpdateCheckTrigger.FOREGROUND.shouldRespectDismissedRelease())
+        assertTrue(TvUpdateCheckTrigger.BACKGROUND.shouldRespectDismissedRelease())
+    }
 }

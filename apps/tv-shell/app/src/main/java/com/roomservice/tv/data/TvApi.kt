@@ -2,6 +2,7 @@ package com.roomservice.tv.data
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Headers
 import retrofit2.http.POST
 import retrofit2.http.Query
 
@@ -20,6 +21,7 @@ interface TvApi {
     suspend fun getTvContext(): TvContext
 
     @GET("tv/update-manifest")
+    @Headers("Cache-Control: no-cache", "Pragma: no-cache")
     suspend fun getUpdateManifest(): TvUpdateManifest
 
     @GET("guest/departments")

@@ -93,7 +93,7 @@
     <string name="tv_update_ready_message">EGI TV %1$s has been downloaded and verified. Continue to install it.</string>
     <string name="tv_update_permission_message">Allow EGI TV to install updates in Android settings, then return here.</string>
     <string name="tv_update_failed">Update could not be prepared</string>
-    <string name="tv_update_failed_message">The update could not be prepared safely. Please try again.</string>
+    <string name="tv_update_failed_message">Update could not be prepared: %1$s</string>
     <string name="tv_update_install">Install update</string>
     <string name="tv_update_open_settings">Open settings</string>
     <string name="tv_update_retry">Try again</string>

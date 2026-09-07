@@ -648,12 +648,16 @@ private fun TvHeader(
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val compactHeader = maxWidth < 1_300.dp
         val actionGap = if (compactHeader) 8.dp else 12.dp
+        val wordmarkWidth = if (compactHeader) 190.dp else 276.dp
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                modifier = Modifier.weight(1f),
+                // Keep a real reservation for the two-line wordmark. The
+                // action row may tighten on compact TVs, but the hotel name
+                // must never collapse into an ellipsis.
+                modifier = Modifier.width(wordmarkWidth),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 HotelMark()
@@ -675,6 +679,8 @@ private fun TvHeader(
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = if (compactHeader) 1.5.sp else 2.sp,
                         maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
                     )
                     Text(
                         text = brandLineTwo,
@@ -684,6 +690,8 @@ private fun TvHeader(
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = if (compactHeader) 1.5.sp else 2.sp,
                         maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
                     )
                 }
             }

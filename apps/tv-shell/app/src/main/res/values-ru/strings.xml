@@ -93,7 +93,7 @@
     <string name="tv_update_ready_message">EGI TV %1$s загружена и проверена. Продолжите установку.</string>
     <string name="tv_update_permission_message">Разрешите EGI TV устанавливать обновления в настройках Android и вернитесь сюда.</string>
     <string name="tv_update_failed">Не удалось подготовить обновление</string>
-    <string name="tv_update_failed_message">Не удалось безопасно подготовить обновление. Повторите попытку.</string>
+    <string name="tv_update_failed_message">Не удалось подготовить обновление: %1$s</string>
     <string name="tv_update_install">Установить</string>
     <string name="tv_update_open_settings">Открыть настройки</string>
     <string name="tv_update_retry">Повторить</string>

@@ -73,6 +73,17 @@ class TvUpdateValidationTest {
         assertTrue(missingRelease is TvUpdateDecision.Invalid)
     }
 
+    @Test
+    fun `new release remains available even when installed version is the previous release`() {
+        val result = evaluateTvUpdateManifest(
+            manifest = validManifest().copy(latestVersionCode = 16, latestVersionName = "0.4.11"),
+            installedPackageName = "com.roomservice.tv",
+            installedVersionCode = 15,
+        )
+
+        assertTrue(result is TvUpdateDecision.Available)
+    }
+
     private fun validManifest(): TvUpdateManifest = TvUpdateManifest(
         enabled = true,
         packageName = "com.roomservice.tv",

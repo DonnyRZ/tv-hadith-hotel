@@ -264,7 +264,11 @@ private fun updateMessage(state: TvUpdateState, language: TvLanguage): String {
     return when (state) {
         is TvUpdateState.Ready -> updateString(R.string.tv_update_ready_message, language, versionName)
         is TvUpdateState.PermissionRequired -> updateString(R.string.tv_update_permission_message, language)
-        is TvUpdateState.Failed -> updateString(R.string.tv_update_failed_message, language)
+        is TvUpdateState.Failed -> updateString(
+            R.string.tv_update_failed_message,
+            language,
+            state.message.replace('\n', ' ').take(180),
+        )
         TvUpdateState.Idle,
         is TvUpdateState.Checking,
         is TvUpdateState.UpToDate,

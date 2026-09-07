@@ -40,7 +40,8 @@ describe('Smart TV provisioning API', () => {
       mandatory: false,
       minSupportedVersionCode: null,
     });
-    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['cache-control']).toContain('no-store');
+    expect(response.headers.pragma).toBe('no-cache');
   });
 
   it('creates a short-lived one-time pairing code without accepting a room number', async () => {
