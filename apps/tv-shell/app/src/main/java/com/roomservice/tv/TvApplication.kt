@@ -12,7 +12,6 @@ import com.roomservice.tv.data.TvRealtimeClient
 import com.roomservice.tv.data.TvRepository
 import com.roomservice.tv.presentation.TvViewModel
 import com.roomservice.tv.update.TvUpdateManager
-import com.roomservice.tv.update.TvUpdateWorkScheduler
 
 class TvApplication : Application() {
     lateinit var container: TvAppContainer
@@ -21,7 +20,6 @@ class TvApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = TvAppContainer(this)
-        TvUpdateWorkScheduler.schedule(this)
     }
 }
 

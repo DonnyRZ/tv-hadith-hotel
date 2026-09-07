@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -14,6 +15,9 @@ import com.roomservice.tv.presentation.RoomServiceTvTheme
 import com.roomservice.tv.presentation.TvViewModel
 import com.roomservice.tv.presentation.TvUpdateOverlay
 import com.roomservice.tv.update.TvUpdateCheckTrigger
+import com.roomservice.tv.update.TvUpdateWorkScheduler
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val tvUpdateManager by lazy { (application as TvApplication).container.updateManager }
@@ -21,12 +25,26 @@ class MainActivity : ComponentActivity() {
         TvViewModelFactory((application as TvApplication).container)
     }
     private var foregroundCheckIssued = false
+    private var backgroundUpdateSchedulingStarted = false
 
     override fun onStart() {
         super.onStart()
         if (!foregroundCheckIssued) {
             foregroundCheckIssued = true
             tvUpdateManager.checkForUpdate(TvUpdateCheckTrigger.FOREGROUND)
+        }
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        if (!backgroundUpdateSchedulingStarted) {
+            backgroundUpdateSchedulingStarted = true
+            // WorkManager must never be part of the critical Activity startup path.
+            // If it is unavailable on a particular TV firmware, foreground and
+            // manual update checks remain fully functional.
+            lifecycleScope.launch(Dispatchers.Default) {
+                TvUpdateWorkScheduler.schedule(applicationContext)
+            }
         }
     }
 
