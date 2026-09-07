@@ -567,7 +567,11 @@ jobs:
           node-version: '24'
 
       - name: Install Railway CLI
-        run: npm install --global @railway/cli
+        # Pin the CLI used for production feed promotion. The unpinned package
+        # install can fail transiently when npm resolves a newly published
+        # dependency tree, which would leave the already-published APK
+        # stranded without promoting its manifest.
+        run: npm install --global @railway/cli@5.49.3 --no-fund --no-audit --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=30000
 
       - name: Download signed release artifact
         uses: actions/download-artifact@v4
